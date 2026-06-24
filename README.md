@@ -11,16 +11,6 @@ npm run dev
 
 브라우저에서 [http://localhost:3000](http://localhost:3000) 접속 시 로그인 페이지로 이동합니다.
 
-## 기본 관리자 계정
-
-최초 실행 시 `data/users.json`이 없으면 아래 계정이 자동 생성됩니다.
-
-| 아이디 | 비밀번호 | 역할 |
-|--------|----------|------|
-| `admin` | `admin123` | 관리자 |
-
-운영 환경에서는 `.env.local`에 `AUTH_SECRET`을 설정하고, 관리자 비밀번호를 반드시 변경하세요.
-
 ## Supabase 연결
 
 `.env.example`을 참고해 `.env.local`에 Supabase URL과 키를 설정한 뒤 서버를 재시작하세요.
