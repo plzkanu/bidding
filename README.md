@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 입찰 · 견적 시스템
 
-## Getting Started
+SOOSAN 입찰 및 견적 관리 시스템입니다.
 
-First, run the development server:
+## 실행 방법
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 [http://localhost:3000](http://localhost:3000) 접속 시 로그인 페이지로 이동합니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 기본 관리자 계정
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+최초 실행 시 `data/users.json`이 없으면 아래 계정이 자동 생성됩니다.
 
-## Learn More
+| 아이디 | 비밀번호 | 역할 |
+|--------|----------|------|
+| `admin` | `admin123` | 관리자 |
 
-To learn more about Next.js, take a look at the following resources:
+운영 환경에서는 `.env.local`에 `AUTH_SECRET`을 설정하고, 관리자 비밀번호를 반드시 변경하세요.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Supabase 연결
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`.env.example`을 참고해 `.env.local`에 Supabase URL과 키를 설정한 뒤 서버를 재시작하세요.
 
-## Deploy on Vercel
+| 변수 | 용도 |
+|------|------|
+| `NEXT_PUBLIC_SUPABASE_URL` | 프로젝트 URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | (선택) 클라이언트용 |
+| `SUPABASE_SERVICE_ROLE_KEY` | 서버에서 `crawl_sites` 조회·관리 |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+입찰공고 사이트 데이터는 Supabase `public.crawl_sites` 테이블을 사용합니다.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+KPOS(한수원) 입찰공고는 `khnp_bid_notice` 및 유형별 상세 테이블(`khnp_bid_open`, `khnp_bid_private`, `khnp_bid_plan_spec`)에 저장되며, `/dashboard/announcements`에서 사이트·공고 유형별로 조회합니다.
+
+관심공고는 Supabase `user_bid_favorites` 테이블에 로그인 사용자 ID(`users.json`의 id)별로 저장됩니다. `supabase/migrations/002_user_bid_favorites.sql`을 Supabase에 적용해야 합니다.
+
+공고별 개인 메모는 `user_bid_notice_memos` 테이블에 사용자·공고 단위로 저장됩니다. `supabase/migrations/003_user_bid_notice_memos.sql`을 적용하세요.
+
+## 페이지
+
+| 경로 | 설명 |
+|------|------|
+| `/login` | 로그인 화면 (SOOSAN BI 로고 표시) |
+| `/dashboard/announcements` | 입찰공고 조회 |
+| `/dashboard/favorites` | 관심공고 (사용자별) |
+| `/dashboard/bid` | 입찰하기 |
+| `/dashboard/estimate` | 견적내기 |
+| `/dashboard/admin` | 관리자메뉴 (관리자 전용) |
+| `/dashboard/admin/users` | 사용자관리 (관리자 전용) |
+| `/dashboard/admin/crawl-sites` | 입찰공고 조회 사이트 관리 (관리자 전용) |
+
+## 기술 스택
+
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS

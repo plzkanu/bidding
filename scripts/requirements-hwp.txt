@@ -1,0 +1,6 @@
+# HWP → PDF (Windows 한컴 오피스 자동화)
+pywin32>=306; sys_platform == "win32"
+# HWP/HWPX 텍스트 추출 (LG엑사원 요약 폴백)
+# HWPX는 lxml 추가 필요 — pip install "hwpkit[hwpx]" 또는 pip install hwpkit lxml
+hwpkit
+lxml
