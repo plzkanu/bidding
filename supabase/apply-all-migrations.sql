@@ -254,6 +254,32 @@ CREATE INDEX IF NOT EXISTS idx_bid_notice_assignments_department_id
 CREATE INDEX IF NOT EXISTS idx_bid_notice_assignments_assignee_user_id
   ON bid_notice_assignments (assignee_user_id);
 
+-- 014 bid_users (앱 사용자 계정)
+CREATE TABLE IF NOT EXISTS bid_users (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  password_hash text NOT NULL,
+  role text NOT NULL CHECK (role IN ('admin', 'user')) DEFAULT 'user',
+  department text NOT NULL DEFAULT '',
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bid_users_role ON bid_users (role);
+CREATE INDEX IF NOT EXISTS idx_bid_users_active ON bid_users (active);
+
+INSERT INTO bid_users (id, name, password_hash, role, department, active) VALUES
+  (
+    'admin',
+    '시스템 관리자',
+    '$2b$10$m6fqr16mquxvwCMKbwAaJOT.aqijUPO6YikbQNpn8U0tV2zLE6OY.',
+    'admin',
+    '',
+    true
+  )
+ON CONFLICT (id) DO NOTHING;
+
 -- RLS: Next.js Service Role API 전용 — PostgREST 사용 시 정책 없이 ENABLE 하면 CRUD 차단됨
 ALTER TABLE crawl_sites DISABLE ROW LEVEL SECURITY;
 ALTER TABLE khnp_bid_notice DISABLE ROW LEVEL SECURITY;
@@ -271,5 +297,6 @@ ALTER TABLE user_order_report_summaries DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_notice_screening_keywords DISABLE ROW LEVEL SECURITY;
 ALTER TABLE departments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_notice_assignments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bid_users DISABLE ROW LEVEL SECURITY;
 
 NOTIFY pgrst, 'reload schema';

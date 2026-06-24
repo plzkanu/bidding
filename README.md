@@ -11,6 +11,17 @@ npm run dev
 
 브라우저에서 [http://localhost:3000](http://localhost:3000) 접속 시 로그인 페이지로 이동합니다.
 
+## 기본 관리자 계정
+
+Supabase `bid_users` 테이블에 사용자가 없으면 최초 접속 시 아래 계정이 자동 생성됩니다.  
+(`supabase/migrations/014_bid_users.sql` 또는 `apply-all-migrations.sql` 적용 시 시드 데이터 포함)
+
+| 아이디 | 비밀번호 | 역할 |
+|--------|----------|------|
+| `admin` | `admin123` | 관리자 |
+
+운영 환경에서는 `.env.local`에 `AUTH_SECRET`을 설정하고, 관리자 비밀번호를 반드시 변경하세요.
+
 ## Supabase 연결
 
 `.env.example`을 참고해 `.env.local`에 Supabase URL과 키를 설정한 뒤 서버를 재시작하세요.
@@ -25,7 +36,7 @@ npm run dev
 
 KPOS(한수원) 입찰공고는 `khnp_bid_notice` 및 유형별 상세 테이블(`khnp_bid_open`, `khnp_bid_private`, `khnp_bid_plan_spec`)에 저장되며, `/dashboard/announcements`에서 사이트·공고 유형별로 조회합니다.
 
-관심공고는 Supabase `user_bid_favorites` 테이블에 로그인 사용자 ID(`users.json`의 id)별로 저장됩니다. `supabase/migrations/002_user_bid_favorites.sql`을 Supabase에 적용해야 합니다.
+관심공고는 Supabase `user_bid_favorites` 테이블에 로그인 사용자 ID(`bid_users.id`)별로 저장됩니다. `supabase/migrations/002_user_bid_favorites.sql`을 Supabase에 적용해야 합니다.
 
 공고별 개인 메모는 `user_bid_notice_memos` 테이블에 사용자·공고 단위로 저장됩니다. `supabase/migrations/003_user_bid_notice_memos.sql`을 적용하세요.
 

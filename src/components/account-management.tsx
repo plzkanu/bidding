@@ -185,7 +185,8 @@ export function AccountManagement({ currentUserId }: AccountManagementProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-500">
           총 <span className="font-semibold text-slate-700">{users.length}</span>
-          개 계정
+          개 계정 · Supabase{" "}
+          <code className="rounded bg-slate-100 px-1">bid_users</code> 테이블
         </p>
         <button
           type="button"

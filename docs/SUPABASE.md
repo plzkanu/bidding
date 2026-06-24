@@ -11,9 +11,9 @@ SOOSAN 입찰 · 견적 시스템에서 Supabase(PostgreSQL + Storage)를 연결
 | 클라이언트 라이브러리 | `@supabase/supabase-js` (^2.107) |
 | 연결 방식 | **서버 전용** — Next.js API Route / Server Component에서만 사용 |
 | 인증 키 | `SUPABASE_SERVICE_ROLE_KEY` (Service Role) |
-| 앱 사용자 인증 | Supabase Auth **미사용** — `data/users.json`의 `id`를 DB `user_id`로 저장 |
+| 앱 사용자 인증 | Supabase Auth **미사용** — `bid_users` 테이블 + bcrypt 세션 쿠키 |
 
-Supabase가 설정되지 않으면 로그인·사용자 관리(`users.json`)는 동작하지만, 입찰공고 조회·관심공고·메모·대시보드·발주요약 등 대부분의 업무 기능은 사용할 수 없습니다.
+Supabase가 설정되지 않으면 로그인·사용자 관리·입찰공고 조회 등 **모든 기능**을 사용할 수 없습니다.
 
 ---
 
@@ -93,6 +93,7 @@ SQL 파일은 `supabase/migrations/` 에 있습니다. Supabase 대시보드 **S
 | 011 | `011_order_report_pq_status.sql` | 발주요약 PQ 필드 (`pq_has_pq`, `pq_submission_date`) |
 | 012 | `012_bid_notice_screening_keywords.sql` | 자동선별 키워드 (`bid_notice_screening_keywords`) |
 | 013 | `013_departments_and_bid_notice_assignments.sql` | 담당부서·공고 배정 (`departments`, `bid_notice_assignments`) |
+| 014 | `014_bid_users.sql` | 앱 사용자 계정 (`bid_users`) |
 
 > **001** 은 Supabase에 이미 KPOS 테이블이 있으면 생략 가능합니다.  
 > **010** 적용 후 `created_by` 컬럼 오류가 나면 **Project Settings → API → Reload schema cache** 를 실행하세요.
@@ -120,7 +121,7 @@ Supabase CLI를 쓰는 경우, 동일 SQL을 `supabase db push` 또는 migration
 
 ### 사용자별 업무 데이터
 
-모든 `user_id`는 **`data/users.json`의 사용자 `id` 문자열**입니다.
+모든 `user_id`는 **`bid_users` 테이블의 사용자 `id` 문자열**입니다.
 
 | 테이블 | 용도 |
 |--------|------|
@@ -136,6 +137,7 @@ Supabase CLI를 쓰는 경우, 동일 SQL을 `supabase db push` 또는 migration
 
 | 테이블 | 용도 |
 |--------|------|
+| `bid_users` | 앱 로그인 사용자 (관리자·일반) |
 | `departments` | 담당부서 |
 | `bid_notice_assignments` | 공고별 부서·담당자 배정 (공고당 1건) |
 | `bid_notice_screening_keywords` | 자동선별 키워드 |
@@ -180,6 +182,7 @@ Supabase CLI를 쓰는 경우, 동일 SQL을 `supabase db push` 또는 migration
 | 공고 직접 등록 | 010 |
 | 자동선별 키워드 | 012 |
 | 담당부서·배정 공고 | 013 |
+| 사용자 계정 (로그인) | 014 |
 
 ---
 
@@ -195,7 +198,7 @@ Supabase CLI를 쓰는 경우, 동일 SQL을 `supabase db push` 또는 migration
 
 - **Service Role Key**는 RLS를 우회합니다. 반드시 서버 환경 변수에만 두고 Git에 커밋하지 마세요.
 - `.env.local`은 `.gitignore`에 포함되어 있어야 합니다.
-- 앱 로그인은 자체 세션(`AUTH_SECRET`) + `users.json`이며, Supabase Auth와 연동하지 않습니다.
+- 앱 로그인은 자체 세션(`AUTH_SECRET`) + Supabase `bid_users`이며, Supabase Auth와 연동하지 않습니다.
 
 ---
 

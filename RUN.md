@@ -77,7 +77,7 @@ npm run dev
 
 ### 기본 관리자 계정
 
-최초 실행 시 `data/users.json`이 없으면 아래 계정이 자동 생성됩니다.
+Supabase `bid_users` 테이블에 사용자가 없으면 최초 로그인 시 아래 계정이 자동 생성됩니다.
 
 | 아이디 | 비밀번호 | 역할 |
 |--------|----------|------|
@@ -166,5 +166,5 @@ PORT=3001 npm run dev
 
 | 데이터 | 저장 위치 |
 |--------|-----------|
-| 사용자 계정 | `data/users.json` (로컬 파일, git 제외) |
+| 사용자 계정 | Supabase `bid_users` |
 | 입찰공고·사이트·관심·메모 | Supabase PostgreSQL |
