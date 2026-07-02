@@ -105,6 +105,9 @@ export async function verifyUserCredentials(
   id: string,
   password: string,
 ): Promise<User | null> {
+  requireSupabase();
+  await seedDefaultAdminIfEmpty();
+
   const user = await findUserById(id.trim().toLowerCase());
   if (!user || !user.active) {
     return null;

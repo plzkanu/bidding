@@ -11,7 +11,14 @@ export const mainNavItems: NavItem[] = [
   { href: "/dashboard/bid", label: "입찰하기" },
   { href: "/dashboard/estimate", label: "견적내기" },
   { href: "/dashboard/results", label: "결과조회" },
+  { href: "/dashboard/opening-results", label: "개찰결과 조회" },
   { href: "/dashboard/admin", label: "관리자메뉴", adminOnly: true },
+];
+
+export const openingResultsSubNavItems: NavItem[] = [
+  { href: "/dashboard/opening-results", label: "개찰결과 목록" },
+  { href: "/dashboard/opening-results/categories", label: "구분 관리" },
+  { href: "/dashboard/opening-results/competitors", label: "경쟁사 관리" },
 ];
 
 export const announcementsSubNavItems: NavItem[] = [

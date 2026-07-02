@@ -22,7 +22,7 @@ INSERT INTO bid_users (id, name, password_hash, role, department, active) VALUES
   (
     'admin',
     '시스템 관리자',
-    '$2b$10$m6fqr16mquxvwCMKbwAaJOT.aqijUPO6YikbQNpn8U0tV2zLE6OY.',
+    '$2b$10$thvBNsuyo9XbeveAObqGGuFjtqnXsyzI6msj//y8lJ7HGkHGrkEsa',
     'admin',
     '',
     true

@@ -4,7 +4,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoutButton } from "@/components/logout-button";
-import { announcementsSubNavItems, mainNavItems } from "@/lib/nav";
+import {
+  announcementsSubNavItems,
+  mainNavItems,
+  openingResultsSubNavItems,
+} from "@/lib/nav";
 import type { SessionUser } from "@/lib/types";
 
 interface AppSidebarProps {
@@ -19,6 +23,7 @@ const NAV_ICONS: Record<string, string> = {
   "/dashboard/bid": "📁",
   "/dashboard/estimate": "🧮",
   "/dashboard/results": "📈",
+  "/dashboard/opening-results": "🏆",
   "/dashboard/admin": "⚙️",
 };
 
@@ -31,6 +36,12 @@ function isNavActive(pathname: string, href: string) {
   }
   if (href === "/dashboard/announcements") {
     return announcementsSubNavItems.some(
+      (item) =>
+        pathname === item.href || pathname.startsWith(`${item.href}/`),
+    );
+  }
+  if (href === "/dashboard/opening-results") {
+    return openingResultsSubNavItems.some(
       (item) =>
         pathname === item.href || pathname.startsWith(`${item.href}/`),
     );

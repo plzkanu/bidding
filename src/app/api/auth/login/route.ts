@@ -42,10 +42,11 @@ export async function POST(request: Request) {
       department: user.department ?? "",
       role: user.role,
     });
-  } catch {
-    return NextResponse.json(
-      { error: "로그인 처리 중 오류가 발생했습니다." },
-      { status: 500 },
-    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "로그인 처리 중 오류가 발생했습니다.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

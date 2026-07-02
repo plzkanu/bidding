@@ -2,6 +2,12 @@ import { isSupabaseTlsInsecure } from "./config";
 
 export function formatSupabaseNetworkError(message: string): string {
   const normalized = message.toLowerCase();
+  if (normalized.includes("could not find the table")) {
+    return (
+      "Supabase에 필요한 테이블이 없습니다. SQL Editor에서 " +
+      "supabase/migrations/014_bid_users.sql 또는 apply-all-migrations.sql을 실행하세요."
+    );
+  }
   if (
     normalized.includes("fetch failed") ||
     normalized.includes("certificate") ||
