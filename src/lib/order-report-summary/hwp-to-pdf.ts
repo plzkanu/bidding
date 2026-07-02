@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { resolvePythonExecutableCandidates } from "@/lib/order-report-summary/resolve-python-executable";
 
 const CONVERSION_TIMEOUT_MS = Number(
   process.env.HWP_PDF_TIMEOUT_MS ?? "120000",
@@ -20,31 +20,6 @@ function getFileExtension(fileName: string): string {
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return ".hwp";
   return base.slice(dot).toLowerCase();
-}
-
-function resolvePythonExecutable(): string {
-  const fromEnv =
-    process.env.HWP_CONVERT_PYTHON?.trim() ||
-    process.env.PYTHON?.trim();
-  if (fromEnv) return fromEnv;
-
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
-    if (localAppData) {
-      const candidates = [
-        path.join(localAppData, "Programs", "Python", "Python314", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python313", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python312", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python311", "python.exe"),
-      ];
-      for (const candidate of candidates) {
-        if (existsSync(candidate)) return candidate;
-      }
-    }
-    return "python";
-  }
-
-  return "python3";
 }
 
 function decodeProcessOutput(chunk: Buffer): string {
@@ -157,10 +132,31 @@ export async function convertHwpBufferToPdf(
 
     await writeFile(inputPath, buffer);
 
-    const python = resolvePythonExecutable();
+    const python = resolvePythonExecutableCandidates();
     const scriptPath = resolveConverterScript();
 
-    await runPythonConverter(python, scriptPath, inputPath, outputPath);
+    let lastError: HwpToPdfError | null = null;
+    for (const candidate of python) {
+      try {
+        await runPythonConverter(candidate, scriptPath, inputPath, outputPath);
+        lastError = null;
+        break;
+      } catch (err) {
+        const error =
+          err instanceof HwpToPdfError
+            ? err
+            : new HwpToPdfError(String(err));
+        const isMissingExecutable =
+          error.message.includes("ENOENT") ||
+          (error.message.includes("spawn") && error.message.includes("ENOENT"));
+        lastError = error;
+        if (isMissingExecutable && candidate !== python.at(-1)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (lastError) throw lastError;
 
     const pdf = await readFile(outputPath);
     if (pdf.byteLength === 0) {

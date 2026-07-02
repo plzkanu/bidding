@@ -1,7 +1,7 @@
 run = "npm run dev"
 entrypoint = "package.json"
 hidden = [".config", ".next", "node_modules"]
-modules = ["nodejs-22"]
+modules = ["nodejs-22", "python3"]
 
 [nix]
 channel = "stable-24_11"

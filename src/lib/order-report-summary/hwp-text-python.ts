@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { resolvePythonExecutableCandidates } from "@/lib/order-report-summary/resolve-python-executable";
 
 const EXTRACT_TIMEOUT_MS = Number(process.env.HWP_TEXT_TIMEOUT_MS ?? "60000");
 
@@ -11,30 +11,6 @@ function getFileExtension(fileName: string): string {
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return ".hwp";
   return base.slice(dot).toLowerCase();
-}
-
-function resolvePythonExecutable(): string {
-  const fromEnv =
-    process.env.HWP_CONVERT_PYTHON?.trim() || process.env.PYTHON?.trim();
-  if (fromEnv) return fromEnv;
-
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
-    if (localAppData) {
-      const candidates = [
-        path.join(localAppData, "Programs", "Python", "Python314", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python313", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python312", "python.exe"),
-        path.join(localAppData, "Programs", "Python", "Python311", "python.exe"),
-      ];
-      for (const candidate of candidates) {
-        if (existsSync(candidate)) return candidate;
-      }
-    }
-    return "py";
-  }
-
-  return "python3";
 }
 
 function decodeProcessOutput(chunk: Buffer): string {
@@ -93,9 +69,14 @@ function runPythonHwpExtract(
 
     child.on("error", (err) => {
       clearTimeout(timer);
+      const code = (err as NodeJS.ErrnoException).code;
+      const hint =
+        code === "ENOENT"
+          ? " Replit 배포 시 .replit에 python3 모듈과 hwpkit 설치가 필요합니다."
+          : "";
       reject(
         new Error(
-          `Python 실행 실패 (${python}): ${err.message}. HWP_CONVERT_PYTHON 환경 변수를 확인하세요.`,
+          `Python 실행 실패 (${python}): ${err.message}. HWP_CONVERT_PYTHON 환경 변수를 확인하세요.${hint}`,
         ),
       );
     });
@@ -129,9 +110,27 @@ export async function extractHwpTextViaPython(
 
   try {
     await writeFile(inputPath, buffer);
-    const python = resolvePythonExecutable();
     const scriptPath = resolveExtractScript();
-    return await runPythonHwpExtract(python, scriptPath, inputPath);
+    const candidates = resolvePythonExecutableCandidates();
+    let lastError: Error | null = null;
+
+    for (const python of candidates) {
+      try {
+        return await runPythonHwpExtract(python, scriptPath, inputPath);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        const isMissingExecutable =
+          error.message.includes("ENOENT") ||
+          error.message.includes("spawn") && error.message.includes("ENOENT");
+        lastError = error;
+        if (isMissingExecutable && python !== candidates.at(-1)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError ?? new Error("Python 실행 파일을 찾을 수 없습니다.");
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
