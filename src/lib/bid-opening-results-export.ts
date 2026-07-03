@@ -139,6 +139,7 @@ function resolveWinnerColumnIndex(
     return index >= 0 ? index : null;
   }
 
+  const winnerKey = normalizeCompetitorKey(winnerLabel);
   const fallbackIndex = competitorColumns.findIndex((name) => {
     const columnKey = normalizeCompetitorKey(name);
     return columnKey === winnerKey || columnKey.includes(winnerKey);

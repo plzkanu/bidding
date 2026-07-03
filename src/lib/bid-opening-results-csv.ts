@@ -192,7 +192,7 @@ function resolveTemplateCompetitorColumns(
 }
 
 export function buildWideHeaderRow(competitorColumns: string[]): string[] {
-  const row = [...WIDE_BASE_HEADERS];
+  const row: string[] = [...WIDE_BASE_HEADERS];
   for (const name of competitorColumns) {
     row.push(name, "");
   }
