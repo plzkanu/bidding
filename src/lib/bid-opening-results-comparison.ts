@@ -128,6 +128,7 @@ export function isComparisonWinnerCell(
 }
 
 export function formatComparisonRate(value: number | null | undefined): string {
-  if (value == null) return "";
-  return formatChartRateLabel(value);
+  const normalized = normalizeStoredBidRate(value);
+  if (normalized == null) return "";
+  return formatChartRateLabel(normalized);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BidOpeningResultDetailModal,
   BidOpeningResultFormModal,
@@ -21,7 +21,7 @@ import {
 } from "@/lib/bid-opening-results-format";
 
 const PAGE_SIZE = 20;
-const LIST_TABLE_CLASS = "w-full min-w-[76rem] table-auto text-left text-sm";
+const LIST_TABLE_CLASS = "w-full min-w-[76rem] table-auto text-left text-xs";
 const CELL_PAD = "px-4 py-2.5";
 const CATEGORY_COL_CLASS = `${CELL_PAD} min-w-[8.5rem] whitespace-nowrap`;
 const NOTICE_NO_COL_CLASS = `${CELL_PAD} min-w-[8.5rem] whitespace-nowrap`;
@@ -60,6 +60,27 @@ export function BidOpeningResultsList() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const exportHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (selectedCategoryId) {
+      params.set("categoryId", selectedCategoryId);
+    }
+    if (search) {
+      params.set("search", search);
+    }
+    const query = params.toString();
+    return `/api/bid-opening-results/export${query ? `?${query}` : ""}`;
+  }, [selectedCategoryId, search]);
+
+  const selectedCategoryName = useMemo(
+    () =>
+      categories.find((category) => category.id === selectedCategoryId)?.name ??
+      "",
+    [categories, selectedCategoryId],
+  );
+
+  const canUseCategoryViews = Boolean(selectedCategoryId);
 
   const loadCategories = useCallback(async () => {
     try {
@@ -283,18 +304,41 @@ export function BidOpeningResultsList() {
 
       {showBulkImport ? (
         <div className="mt-4 space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            <p className="font-medium text-slate-800">일괄등록 안내</p>
+            <ul className="mt-2 list-inside list-disc space-y-1">
+              <li>
+                <strong>Excel 양식(권장)</strong>: 「개찰결과」시트에 공고 1건당
+                1행으로 입력 · 「작성안내」시트 참고
+              </li>
+              <li>
+                CSV 양식: 가로형(공고 1행) · 세로형은 경쟁사마다 행 반복
+              </li>
+              <li>
+                구분·경쟁사 이름은 각 관리 메뉴에 등록된 이름과 동일해야 합니다
+              </li>
+              <li>확정예가(%)는 입력하지 않으며 기초금액·예정가격으로 자동 계산됩니다</li>
+            </ul>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="/api/bid-opening-results/template?format=xlsx"
+              className="rounded-lg border border-[#004b87]/30 bg-[#004b87]/5 px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#004b87]/10"
+            >
+              Excel 양식 (권장)
+            </a>
             <a
               href="/api/bid-opening-results/template"
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
             >
-              CSV 양식
+              CSV 가로양식
             </a>
             <a
-              href="/api/bid-opening-results/template?format=xlsx"
+              href="/api/bid-opening-results/template?format=long"
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
             >
-              Excel 양식
+              CSV 세로양식
             </a>
             <button
               type="button"
@@ -353,7 +397,9 @@ export function BidOpeningResultsList() {
       <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-2">
           <div>
-            <label className="mb-1 block text-xs text-slate-500">구분</label>
+            <label className="mb-1 block text-xs text-slate-500">
+              구분 <span className="text-slate-400">(그래프·비교)</span>
+            </label>
             <select
               value={selectedCategoryId}
               onChange={(e) => {
@@ -389,10 +435,28 @@ export function BidOpeningResultsList() {
         </form>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-500">총 {total}건</span>
+          <a
+            href={exportHref}
+            download
+            className={`rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 ${
+              total === 0 ? "pointer-events-none opacity-40" : ""
+            }`}
+            aria-disabled={total === 0}
+            onClick={(event) => {
+              if (total === 0) {
+                event.preventDefault();
+              }
+            }}
+          >
+            Excel 다운로드
+          </a>
           <button
             type="button"
             onClick={() => setShowComparison(true)}
-            disabled={total === 0}
+            disabled={!canUseCategoryViews}
+            title={
+              canUseCategoryViews ? undefined : "구분을 선택한 뒤 사용할 수 있습니다."
+            }
             className="rounded-lg border border-[#004b87]/30 px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#004b87]/5 disabled:opacity-40"
           >
             경쟁업체비교
@@ -400,7 +464,10 @@ export function BidOpeningResultsList() {
           <button
             type="button"
             onClick={() => setShowChart(true)}
-            disabled={total === 0}
+            disabled={!canUseCategoryViews}
+            title={
+              canUseCategoryViews ? undefined : "구분을 선택한 뒤 사용할 수 있습니다."
+            }
             className="rounded-lg border border-[#004b87]/30 px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#004b87]/5 disabled:opacity-40"
           >
             그래프
@@ -410,11 +477,11 @@ export function BidOpeningResultsList() {
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {isLoading ? (
-          <p className="px-6 py-16 text-center text-sm text-slate-400">
+          <p className="px-6 py-16 text-center text-xs text-slate-400">
             불러오는 중…
           </p>
         ) : items.length === 0 ? (
-          <div className="px-6 py-16 text-center text-sm text-slate-500">
+          <div className="px-6 py-16 text-center text-xs text-slate-500">
             <p>등록된 개찰결과가 없습니다.</p>
             <button
               type="button"
@@ -560,6 +627,7 @@ export function BidOpeningResultsList() {
       {showComparison ? (
         <BidOpeningResultsComparisonModal
           categoryId={selectedCategoryId}
+          categoryName={selectedCategoryName}
           onClose={() => setShowComparison(false)}
           onSelectResult={(item) => {
             setShowComparison(false);
@@ -571,6 +639,7 @@ export function BidOpeningResultsList() {
       {showChart ? (
         <BidOpeningResultsChartModal
           categoryId={selectedCategoryId}
+          categoryName={selectedCategoryName}
           onClose={() => setShowChart(false)}
         />
       ) : null}

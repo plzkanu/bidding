@@ -4,8 +4,9 @@ export function formatOpeningAmount(value: number | null | undefined): string {
 }
 
 export function formatOpeningRate(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 4 })}%`;
+  const normalized = normalizeStoredBidRate(value);
+  if (normalized == null) return "-";
+  return `${normalized.toLocaleString("ko-KR", { maximumFractionDigits: 4 })}%`;
 }
 
 export function parseAmountInput(value: string): number | null {
@@ -22,19 +23,15 @@ export function parseRateInput(value: string): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
-/** Excel 비율 셀 (0.79995, 99.93%, 101.2 등) */
+/** Excel 비율 셀 (0.79995, 0.87%, 99.93%, 101.2 등) */
 export function parseOpeningPercentValue(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (trimmed.includes("%")) {
-    return parseRateInput(trimmed);
-  }
-  const num = parseAmountInput(trimmed);
+  const num = trimmed.includes("%")
+    ? parseRateInput(trimmed)
+    : parseAmountInput(trimmed);
   if (num == null) return null;
-  if (num > 0 && num < 10 && !Number.isInteger(num)) {
-    return parseFloat((num * 100).toFixed(4));
-  }
-  return num;
+  return normalizeStoredBidRate(num);
 }
 
 /**
@@ -83,8 +80,9 @@ export function computeBidRateFromAmount(
 export function formatBidRateInputValue(
   value: number | null | undefined,
 ): string {
-  if (value == null) return "";
-  return String(value);
+  const normalized = normalizeStoredBidRate(value);
+  if (normalized == null) return "";
+  return String(normalized);
 }
 
 export type BidOpeningAwardWinnerType = "ours" | "competitor";
@@ -147,7 +145,7 @@ export function getOurCompanyChartLegendLabel(): string {
   );
 }
 
-/** DB·Excel 혼용 투찰율(%) 정규화 */
+/** DB·Excel 혼용 투찰율(%) 정규화 — 0.87·1.01 등 소수 비율을 87·101.05(%)로 변환 */
 export function normalizeStoredBidRate(
   rate: number | null | undefined,
 ): number | null {

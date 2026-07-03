@@ -14,6 +14,7 @@ import {
 
 interface BidOpeningResultsComparisonModalProps {
   categoryId: string;
+  categoryName: string;
   onClose: () => void;
   onSelectResult?: (item: BidOpeningResult) => void;
 }
@@ -27,6 +28,7 @@ const CONFIRMED_CELL_CLASS = "bg-[#FCE4D6]";
 
 export function BidOpeningResultsComparisonModal({
   categoryId,
+  categoryName,
   onClose,
   onSelectResult,
 }: BidOpeningResultsComparisonModalProps) {
@@ -92,9 +94,16 @@ export function BidOpeningResultsComparisonModal({
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800">경쟁업체 비교</h2>
+            <h2 className="text-lg font-semibold text-slate-800">
+              경쟁업체 비교
+              {categoryName ? (
+                <span className="ml-2 text-base font-medium text-[#004b87]">
+                  · {categoryName}
+                </span>
+              ) : null}
+            </h2>
             <p className="mt-1 text-sm text-slate-500">
-              입찰일 최신순 · 노란색: 낙찰 업체 투찰
+              선택 구분 기준 · 입찰일 최신순 · 노란색: 낙찰 업체 투찰
             </p>
           </div>
           <button

@@ -8,12 +8,13 @@ import {
   computeBidRateFromAmount,
   computeConfirmedEstimatedPriceRate,
   formatAwardWinnerLabel,
+  formatBidRateInputValue,
   formatOpeningAmount,
   formatOpeningDate,
   formatOpeningRate,
   hasOurOpeningBid,
   parseAmountInput,
-  parseRateInput,
+  parseOpeningPercentValue,
   toOpeningDateInputValue,
   type BidOpeningAwardWinnerType,
 } from "@/lib/bid-opening-results-format";
@@ -70,7 +71,7 @@ export function BidOpeningResultFormModal({
     item?.estimatedPrice != null ? String(item.estimatedPrice) : "",
   );
   const [awardRate, setAwardRate] = useState(
-    item?.awardRate != null ? String(item.awardRate) : "",
+    item?.awardRate != null ? formatBidRateInputValue(item.awardRate) : "",
   );
   const [bidRows, setBidRows] = useState<BidRow[]>(() => toBidRows(item));
   const [awardWinnerType, setAwardWinnerType] = useState<
@@ -90,7 +91,7 @@ export function BidOpeningResultFormModal({
     parseAmountInput(estimatedPrice),
   );
   const parsedBaseAmount = parseAmountInput(baseAmount);
-  const parsedAwardRate = parseRateInput(awardRate);
+  const parsedAwardRate = parseOpeningPercentValue(awardRate);
   const computedOurBidRate = computeBidRateFromAmount(
     parseAmountInput(ourBidAmount),
     parsedAwardRate,

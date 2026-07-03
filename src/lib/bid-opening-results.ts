@@ -12,6 +12,7 @@ import {
   computeConfirmedEstimatedPriceRate,
   computeBidRateFromAmount,
   formatAwardWinnerLabel,
+  normalizeStoredBidRate,
   parseOpeningDateInput,
   type BidOpeningAwardWinnerType,
 } from "@/lib/bid-opening-results-format";
@@ -286,11 +287,12 @@ async function validateResultInput(
 function normalizeBidRatesInInput(
   input: BidOpeningResultInput,
 ): BidOpeningResultInput {
-  const awardRate = input.awardRate ?? null;
+  const awardRate = normalizeStoredBidRate(input.awardRate ?? null);
   const baseAmount = input.baseAmount ?? null;
 
   return {
     ...input,
+    awardRate,
     ourBidRate: computeBidRateFromAmount(
       input.ourBidAmount ?? null,
       awardRate,
@@ -298,11 +300,13 @@ function normalizeBidRatesInInput(
     ),
     bids: (input.bids ?? []).map((bid) => ({
       ...bid,
-      bidRate: computeBidRateFromAmount(
-        bid.bidAmount ?? null,
-        awardRate,
-        baseAmount,
-      ),
+      bidRate:
+        normalizeStoredBidRate(bid.bidRate ?? null) ??
+        computeBidRateFromAmount(
+          bid.bidAmount ?? null,
+          awardRate,
+          baseAmount,
+        ),
     })),
   };
 }
@@ -434,6 +438,66 @@ export async function listBidOpeningResults(options?: {
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "개찰결과 목록 조회에 실패했습니다.";
+    return { items: [], total: 0, error: normalizeBidOpeningResultsError(message) };
+  }
+}
+
+const EXPORT_MAX_ROWS = 5000;
+
+export async function listBidOpeningResultsForExport(options?: {
+  categoryId?: string | null;
+  search?: string | null;
+}): Promise<{
+  items: BidOpeningResult[];
+  total: number;
+  error: string | null;
+}> {
+  const configError = supabaseNotReadyError();
+  if (configError) {
+    return { items: [], total: 0, error: configError };
+  }
+
+  try {
+    const supabase = createServerClient();
+    let query = supabase
+      .from("bid_opening_results")
+      .select(RESULT_SELECT, { count: "exact" })
+      .order("bid_date", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(EXPORT_MAX_ROWS);
+
+    if (options?.categoryId) {
+      query = query.eq("category_id", options.categoryId);
+    }
+
+    const search = options?.search?.trim();
+    if (search) {
+      const pattern = `%${search}%`;
+      query = query.or(
+        `notice_no.ilike.${pattern},bid_name.ilike.${pattern}`,
+      );
+    }
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      return {
+        items: [],
+        total: 0,
+        error: normalizeBidOpeningResultsError(error.message),
+      };
+    }
+
+    return {
+      items: (data ?? []).map((row) =>
+        mapResultRow(row as Record<string, unknown>),
+      ),
+      total: count ?? 0,
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "개찰결과 내보내기 조회에 실패했습니다.";
     return { items: [], total: 0, error: normalizeBidOpeningResultsError(message) };
   }
 }

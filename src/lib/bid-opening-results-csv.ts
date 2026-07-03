@@ -13,12 +13,12 @@ import {
 } from "@/lib/bid-opening-results";
 import {
   computeConfirmedEstimatedPriceRate,
+  getOurCompanyChartTitle,
   isOurCompanyAwardName,
   parseCsvAwardWinner,
   parseAmountInput,
   parseOpeningDateInput,
   parseOpeningPercentValue,
-  parseRateInput,
 } from "@/lib/bid-opening-results-format";
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -32,7 +32,6 @@ export const BID_OPENING_RESULTS_CSV_HEADERS = [
   "기초금액",
   "예정가격",
   "낙착율",
-  "확정예가",
   "낙찰자",
   "우리투찰금액",
   "우리투찰율",
@@ -41,13 +40,15 @@ export const BID_OPENING_RESULTS_CSV_HEADERS = [
   "투찰율",
 ] as const;
 
+/** 예전 양식·불필요 열 — 업로드 시 무시 (확정예가는 기초금액·예정가격으로 자동 계산) */
+const IGNORED_CSV_HEADERS = new Set(["확정예가"]);
+
 type CsvHeaderName = (typeof BID_OPENING_RESULTS_CSV_HEADERS)[number];
 
 const OPTIONAL_CSV_HEADERS = new Set<CsvHeaderName>([
   "낙찰자",
   "우리투찰금액",
   "우리투찰율",
-  "확정예가",
 ]);
 
 const CSV_HEADER_ALIASES: Record<string, CsvHeaderName> = {
@@ -55,6 +56,25 @@ const CSV_HEADER_ALIASES: Record<string, CsvHeaderName> = {
   낙찰율: "낙착율",
   낙찰회사: "낙찰자",
 };
+
+export interface BidOpeningResultsTemplateContext {
+  categories: string[];
+  competitors: string[];
+}
+
+const WIDE_BASE_HEADERS = [
+  "구분",
+  "입찰공고번호",
+  "입찰명",
+  "입찰일",
+  "기초금액",
+  "예정가격",
+  "낙착율",
+  "낙찰자",
+] as const;
+
+const DEFAULT_TEMPLATE_CATEGORY = "용역";
+const DEFAULT_TEMPLATE_COMPETITORS = ["A건설", "B엔지니어링"];
 
 const UTF8_BOM = "\uFEFF";
 
@@ -103,58 +123,249 @@ function encodeCsvField(value: string): string {
   return value;
 }
 
-const TEMPLATE_EXAMPLE_ROWS: string[][] = [
+const LONG_FORMAT_EXAMPLE_ROWS: string[][] = [
   [
-    "건설",
-    "2026-001",
+    "용역",
+    "U26S132000",
     "OO발전소 설비공사",
     "26.06.15",
     "1000000000",
     "950000000",
     "87.5",
-    "",
-    "우리",
+    "수산인더스트리",
     "910000000",
-    "87.8",
+    "101.053",
     "A건설",
     "920000000",
-    "88.2",
+    "102.105",
   ],
   [
-    "건설",
-    "2026-001",
+    "용역",
+    "U26S132000",
     "OO발전소 설비공사",
     "26.06.15",
     "1000000000",
     "950000000",
     "87.5",
-    "",
-    "우리",
+    "수산인더스트리",
     "910000000",
-    "87.8",
+    "101.053",
     "B엔지니어링",
     "935000000",
-    "89.5",
+    "103.158",
   ],
 ];
 
-export function buildBidOpeningResultsCsvTemplate(): string {
-  const header = BID_OPENING_RESULTS_CSV_HEADERS.join(",");
+function resolveTemplateCategory(ctx?: BidOpeningResultsTemplateContext): string {
+  return ctx?.categories[0]?.trim() || DEFAULT_TEMPLATE_CATEGORY;
+}
+
+function resolveTemplateCompetitorColumns(
+  ctx?: BidOpeningResultsTemplateContext,
+): string[] {
+  const ourLabel = getOurCompanyChartTitle();
+  const columns: string[] = [];
+  const seen = new Set<string>();
+
+  const addColumn = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    columns.push(trimmed);
+  };
+
+  addColumn(ourLabel);
+  for (const name of ctx?.competitors ?? []) {
+    if (!isOurCompanyAwardName(name)) {
+      addColumn(name);
+    }
+  }
+  if (columns.length <= 1) {
+    for (const name of DEFAULT_TEMPLATE_COMPETITORS) {
+      addColumn(name);
+    }
+  }
+
+  return columns.slice(0, 12);
+}
+
+export function buildWideHeaderRow(competitorColumns: string[]): string[] {
+  const row = [...WIDE_BASE_HEADERS];
+  for (const name of competitorColumns) {
+    row.push(name, "");
+  }
+  return row;
+}
+
+export function buildWideSubHeaderRow(competitorCount: number): string[] {
+  const row = Array<string>(WIDE_BASE_HEADERS.length).fill("");
+  for (let index = 0; index < competitorCount; index += 1) {
+    row.push("투찰금액", "투찰율");
+  }
+  return row;
+}
+
+export const WIDE_FORMAT_BASE_COLUMN_COUNT = WIDE_BASE_HEADERS.length;
+
+function buildWideExampleRow(
+  ctx: BidOpeningResultsTemplateContext | undefined,
+  competitorColumns: string[],
+): string[] {
+  const category = resolveTemplateCategory(ctx);
+  const ourLabel = getOurCompanyChartTitle();
+  const baseAmount = 1_000_000_000;
+  const estimatedPrice = 950_000_000;
+  const awardRate = 87.5;
+  const exampleAmounts = [
+    910_000_000, 920_000_000, 935_000_000, 940_000_000, 905_000_000,
+  ];
+  const exampleRates = [101.053, 102.105, 103.158, 103.684, 100.421];
+
+  const row: string[] = [
+    category,
+    "U26S132000",
+    "OO발전소 설비공사",
+    "26.06.15",
+    String(baseAmount),
+    String(estimatedPrice),
+    String(awardRate),
+    ourLabel,
+  ];
+
+  competitorColumns.forEach((_name, index) => {
+    row.push(
+      String(exampleAmounts[index % exampleAmounts.length]),
+      String(exampleRates[index % exampleRates.length]),
+    );
+  });
+
+  return row;
+}
+
+function buildTemplateGuideRows(
+  ctx: BidOpeningResultsTemplateContext | undefined,
+): string[][] {
+  const categoryHint =
+    ctx?.categories.length
+      ? ctx.categories.join(", ")
+      : "구분 관리에 등록한 이름 (예: 용역, 건설)";
+  const competitorHint =
+    ctx?.competitors.length
+      ? ctx.competitors.join(", ")
+      : "경쟁사 관리에 등록한 이름";
+
+  return [
+    ["개찰결과 일괄등록 양식 작성 안내"],
+    [""],
+    ["■ 공통"],
+    ["- 구분·경쟁사 이름은 시스템에 등록된 이름과 동일해야 합니다."],
+    [`- 등록된 구분: ${categoryHint}`],
+    [`- 등록된 경쟁사: ${competitorHint}`],
+    ["- 입찰일: 26.06.15 형식 (YY.MM.DD)"],
+    ["- 금액: 콤마 없이 숫자만 (원)"],
+    ["- 낙착율·투찰율: 101.053 또는 87.5% 형식"],
+    ["- 낙찰자: 우리 / 수산인더스트리 / 경쟁사명"],
+    ["- 확정예가(%)는 기초금액·예정가격으로 자동 계산되며 입력하지 않습니다."],
+    ["- 같은 입찰공고번호는 한 번만 등록할 수 있습니다."],
+    [""],
+    ["■ 가로양식 (권장) — 시트「개찰결과」"],
+    ["- 공고 1건당 1행, 경쟁사별 투찰금액·투찰율을 열로 입력"],
+    [`- ${getOurCompanyChartTitle()} 열은 우리 투찰로 인식됩니다.`],
+    ["- 2행(투찰금액/투찰율)은 안내용이며 업로드 시 자동으로 건너뜁니다."],
+    [""],
+    ["■ 세로양식 — 시트「세로양식」"],
+    ["- 경쟁사 1곳당 1행, 같은 공고 정보를 반복 입력"],
+    ["- 우리 투찰은「우리투찰금액/우리투찰율」열 또는 경쟁사=우리 회사명"],
+  ];
+}
+
+export function buildBidOpeningResultsCsvTemplate(
+  ctx?: BidOpeningResultsTemplateContext,
+): string {
+  const competitorColumns = resolveTemplateCompetitorColumns(ctx);
   const lines = [
-    header,
-    ...TEMPLATE_EXAMPLE_ROWS.map((row) => row.map(encodeCsvField).join(",")),
+    buildWideHeaderRow(competitorColumns).map(encodeCsvField).join(","),
+    buildWideSubHeaderRow(competitorColumns.length).map(encodeCsvField).join(","),
+    buildWideExampleRow(ctx, competitorColumns).map(encodeCsvField).join(","),
   ];
 
   return UTF8_BOM + lines.join("\r\n");
 }
 
-export function buildBidOpeningResultsXlsxTemplate(): ArrayBuffer {
-  const sheet = XLSX.utils.aoa_to_sheet([
-    [...BID_OPENING_RESULTS_CSV_HEADERS],
-    ...TEMPLATE_EXAMPLE_ROWS,
+export function buildBidOpeningResultsLongCsvTemplate(
+  ctx?: BidOpeningResultsTemplateContext,
+): string {
+  const category = resolveTemplateCategory(ctx);
+  const rows = LONG_FORMAT_EXAMPLE_ROWS.map((row) => {
+    const copy = [...row];
+    copy[0] = category;
+    return copy;
+  });
+  const header = BID_OPENING_RESULTS_CSV_HEADERS.join(",");
+  const lines = [
+    header,
+    ...rows.map((row) => row.map(encodeCsvField).join(",")),
+  ];
+  return UTF8_BOM + lines.join("\r\n");
+}
+
+export function buildBidOpeningResultsXlsxTemplate(
+  ctx?: BidOpeningResultsTemplateContext,
+): ArrayBuffer {
+  const competitorColumns = resolveTemplateCompetitorColumns(ctx);
+
+  const wideSheet = XLSX.utils.aoa_to_sheet([
+    buildWideHeaderRow(competitorColumns),
+    buildWideSubHeaderRow(competitorColumns.length),
+    buildWideExampleRow(ctx, competitorColumns),
   ]);
+  wideSheet["!cols"] = [
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 28 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 8 },
+    { wch: 14 },
+    ...competitorColumns.flatMap(() => [{ wch: 14 }, { wch: 10 }]),
+  ];
+
+  const category = resolveTemplateCategory(ctx);
+  const longRows = LONG_FORMAT_EXAMPLE_ROWS.map((row) => {
+    const copy = [...row];
+    copy[0] = category;
+    return copy;
+  });
+  const longSheet = XLSX.utils.aoa_to_sheet([
+    [...BID_OPENING_RESULTS_CSV_HEADERS],
+    ...longRows,
+  ]);
+  longSheet["!cols"] = [
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 28 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 10 },
+  ];
+
+  const guideSheet = XLSX.utils.aoa_to_sheet(buildTemplateGuideRows(ctx));
+  guideSheet["!cols"] = [{ wch: 88 }];
+
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "개찰결과");
+  XLSX.utils.book_append_sheet(workbook, wideSheet, "개찰결과");
+  XLSX.utils.book_append_sheet(workbook, longSheet, "세로양식");
+  XLSX.utils.book_append_sheet(workbook, guideSheet, "작성안내");
   return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 
@@ -175,10 +386,43 @@ function formatXlsxCell(cell: XLSX.CellObject | undefined): string {
 
 export function parseXlsxToTable(buffer: ArrayBuffer): string[][] {
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return [];
+  let bestTable: string[][] = [];
+  let bestScore = -1;
 
-  const sheet = workbook.Sheets[sheetName];
+  for (const sheetName of workbook.SheetNames) {
+    if (sheetName === "작성안내") continue;
+
+    const sheet = workbook.Sheets[sheetName];
+    const table = parseXlsxSheetToTable(sheet);
+    if (table.length === 0) continue;
+
+    const score = scoreImportSheetTable(table);
+    if (score > bestScore) {
+      bestScore = score;
+      bestTable = table;
+    }
+  }
+
+  return bestTable;
+}
+
+function scoreImportSheetTable(table: string[][]): number {
+  if (findWideColumnLayout(table)) {
+    return table.length + 100;
+  }
+
+  const headerRowIndex = findImportHeaderRowIndex(table);
+  const headerResult = buildColumnIndexes(
+    table[headerRowIndex]?.map(normalizeHeader) ?? [],
+  );
+  if ("error" in headerResult) {
+    return 0;
+  }
+
+  return table.length;
+}
+
+function parseXlsxSheetToTable(sheet: XLSX.WorkSheet): string[][] {
   const ref = sheet["!ref"];
   if (!ref) return [];
 
@@ -352,6 +596,8 @@ function buildColumnIndexes(
   const seen = new Set<CsvHeaderName>();
 
   for (const [index, cell] of headerCells.entries()) {
+    const normalized = normalizeHeader(cell);
+    if (IGNORED_CSV_HEADERS.has(normalized)) continue;
     const canonical = canonicalHeaderName(cell);
     if (!canonical) continue;
     if (seen.has(canonical)) {
@@ -771,14 +1017,14 @@ function groupRows(
         bidDate,
         baseAmount: parseAmountInput(row.values.기초금액),
         estimatedPrice: parseAmountInput(row.values.예정가격),
-        awardRate: parseRateInput(row.values.낙착율),
+        awardRate: parseOpeningPercentValue(row.values.낙착율),
         confirmedEstimatedPrice: computeConfirmedEstimatedPriceRate(
           parseAmountInput(row.values.기초금액),
           parseAmountInput(row.values.예정가격),
         ),
         awardWinnerRaw: awardWinnerRaw || null,
         ourBidAmount: parseAmountInput(row.values.우리투찰금액),
-        ourBidRate: parseRateInput(row.values.우리투찰율),
+        ourBidRate: parseOpeningPercentValue(row.values.우리투찰율),
         bids: [],
       };
       groups.set(key, group);
@@ -813,7 +1059,7 @@ function groupRows(
         row.rowNumber,
         noticeNo,
         parseAmountInput(row.values.우리투찰금액),
-        parseRateInput(row.values.우리투찰율),
+        parseOpeningPercentValue(row.values.우리투찰율),
         warnings,
       );
     }
@@ -825,7 +1071,7 @@ function groupRows(
           row.rowNumber,
           noticeNo,
           parseAmountInput(row.values.투찰금액),
-          parseRateInput(row.values.투찰율),
+          parseOpeningPercentValue(row.values.투찰율),
           warnings,
         );
         continue;
@@ -843,7 +1089,7 @@ function groupRows(
         rowNumber: row.rowNumber,
         competitorName,
         bidAmount: parseAmountInput(row.values.투찰금액),
-        bidRate: parseRateInput(row.values.투찰율),
+        bidRate: parseOpeningPercentValue(row.values.투찰율),
       });
     }
   }

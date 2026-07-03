@@ -1,7 +1,11 @@
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
+import { listBidCompetitors } from "@/lib/bid-competitors";
+import { listBidOpeningCategories } from "@/lib/bid-opening-categories";
 import {
   buildBidOpeningResultsCsvTemplate,
+  buildBidOpeningResultsLongCsvTemplate,
   buildBidOpeningResultsXlsxTemplate,
+  type BidOpeningResultsTemplateContext,
 } from "@/lib/bid-opening-results-csv";
 import {
   getSupabaseConfigError,
@@ -16,6 +20,17 @@ function supabaseNotConfiguredResponse() {
   );
 }
 
+async function loadTemplateContext(): Promise<BidOpeningResultsTemplateContext> {
+  const [{ categories }, { competitors }] = await Promise.all([
+    listBidOpeningCategories({ activeOnly: true }),
+    listBidCompetitors({ activeOnly: true }),
+  ]);
+  return {
+    categories: categories.map((row) => row.name),
+    competitors: competitors.map((row) => row.name),
+  };
+}
+
 export async function GET(request: Request) {
   const session = await getApiSession();
   if (!session) {
@@ -27,9 +42,10 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format")?.trim().toLowerCase();
+  const ctx = await loadTemplateContext();
 
   if (format === "xlsx") {
-    const buffer = buildBidOpeningResultsXlsxTemplate();
+    const buffer = buildBidOpeningResultsXlsxTemplate(ctx);
     return new Response(buffer, {
       headers: {
         "Content-Type":
@@ -40,7 +56,18 @@ export async function GET(request: Request) {
     });
   }
 
-  const csv = buildBidOpeningResultsCsvTemplate();
+  if (format === "long" || format === "vertical") {
+    const csv = buildBidOpeningResultsLongCsvTemplate(ctx);
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition":
+          'attachment; filename="bid-opening-results-vertical-template.csv"; filename*=UTF-8\'\'%EA%B0%9C%EC%B0%B0%EA%B2%B0%EA%B3%BC_%EC%84%B8%EB%A1%9C%EC%96%91%EC%8B%9D.csv',
+      },
+    });
+  }
+
+  const csv = buildBidOpeningResultsCsvTemplate(ctx);
 
   return new Response(csv, {
     headers: {

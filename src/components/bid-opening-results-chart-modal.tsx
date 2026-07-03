@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BidOpeningResult } from "@/lib/bid-opening-results";
 import {
   buildOpeningResultsChartData,
@@ -9,9 +9,18 @@ import {
   getDefaultSelectedCompanyIds,
   type OpeningResultsChartCompany,
 } from "@/lib/bid-opening-results-chart";
+import {
+  getVisibleLabelIndices,
+  getVisibleXAxisIndices,
+  layoutChartDataLabels,
+  shouldShowValueLabelsByDefault,
+  type ChartLabelInput,
+  type ChartLabelLayout,
+} from "@/lib/bid-opening-results-chart-labels";
 
 interface BidOpeningResultsChartModalProps {
   categoryId: string;
+  categoryName: string;
   onClose: () => void;
 }
 
@@ -126,43 +135,28 @@ function CircleMarker({
   );
 }
 
-function DataLabel({
-  x,
-  y,
-  value,
-  color,
-  placement,
-}: {
-  x: number;
-  y: number;
-  value: number;
-  color: string;
-  placement: "above" | "below";
-}) {
-  const label = formatChartRateLabel(value);
-  const width = label.length * 7.2 + 16;
-  const height = 22;
-  const rectY = placement === "above" ? y - height - 10 : y + 10;
-
+function DataLabel({ layout }: { layout: ChartLabelLayout }) {
+  if (!layout.visible) return null;
+  const label = formatChartRateLabel(layout.value);
   return (
-    <g>
+    <g pointerEvents="none">
       <rect
-        x={x - width / 2}
-        y={rectY}
-        width={width}
-        height={height}
+        x={layout.rectX}
+        y={layout.rectY}
+        width={layout.width}
+        height={layout.height}
         rx={6}
         fill="#ffffff"
-        stroke={color}
+        stroke={layout.color}
         strokeWidth={1.5}
         opacity={0.96}
       />
       <text
-        x={x}
-        y={rectY + 15}
+        x={layout.x}
+        y={layout.rectY + 15}
         textAnchor="middle"
         fontSize={12}
-        fill={color}
+        fill={layout.color}
         fontWeight={600}
       >
         {label}
@@ -181,6 +175,8 @@ function ChartSeries({
   pointCount,
   showArea,
   dashed,
+  labelLayoutMap,
+  highlightedIndex,
 }: {
   series: OpeningResultsChartCompany;
   marker: "diamond" | "circle";
@@ -191,9 +187,10 @@ function ChartSeries({
   pointCount: number;
   showArea?: boolean;
   dashed?: boolean;
+  labelLayoutMap: Map<string, ChartLabelLayout>;
+  highlightedIndex: number | null;
 }) {
   const segments = buildLineSegments(series.values);
-  const labelPlacement = marker === "diamond" ? "above" : "below";
 
   return (
     <g>
@@ -238,17 +235,18 @@ function ChartSeries({
         const x = scaleX(index, pointCount, innerWidth);
         const y = scaleY(value, yMin, yMax, innerHeight);
         const Marker = marker === "diamond" ? DiamondMarker : CircleMarker;
+        const labelId = `${series.id}-point-${index}`;
+        const layout = labelLayoutMap.get(labelId);
+        const isHighlighted = highlightedIndex === index;
         return (
-          <g key={`${series.id}-point-${index}`} filter="url(#point-shadow)">
+          <g
+            key={`${series.id}-point-${index}`}
+            filter="url(#point-shadow)"
+            opacity={highlightedIndex == null || isHighlighted ? 1 : 0.45}
+          >
             <circle cx={x} cy={y} r={12} fill={series.color} opacity={0.12} />
             <Marker cx={x} cy={y} color={series.color} />
-            <DataLabel
-              x={x}
-              y={y}
-              value={value}
-              color={series.color}
-              placement={labelPlacement}
-            />
+            {layout ? <DataLabel layout={layout} /> : null}
           </g>
         );
       })}
@@ -256,14 +254,27 @@ function ChartSeries({
   );
 }
 
+interface TooltipEntry {
+  label: string;
+  color: string;
+  value: number;
+}
+
 export function BidOpeningResultsChartModal({
   categoryId,
+  categoryName,
   onClose,
 }: BidOpeningResultsChartModalProps) {
   const [items, setItems] = useState<BidOpeningResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+  const [labelPreference, setLabelPreference] = useState<"auto" | "on" | "off">(
+    "auto",
+  );
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0, maxX: 600 });
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function loadChartData() {
@@ -312,6 +323,13 @@ export function BidOpeningResultsChartModal({
     selectedCompanyIds.includes(company.id),
   );
 
+  const seriesCount = 1 + selectedCompanies.length;
+  const pointCount = chartData.pointLabels.length;
+  const showValueLabels =
+    labelPreference === "auto"
+      ? shouldShowValueLabelsByDefault(pointCount, seriesCount)
+      : labelPreference === "on";
+
   const activeValues = useMemo(() => {
     const values: number[] = [];
     for (const value of chartData.confirmedSeries.values) {
@@ -328,9 +346,95 @@ export function BidOpeningResultsChartModal({
   const yAxis = useMemo(() => computeChartYAxis(activeValues), [activeValues]);
   const innerWidth = CHART_WIDTH - MARGIN.left - MARGIN.right;
   const innerHeight = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
-  const pointCount = chartData.pointLabels.length;
   const showHundredLine =
     yAxis.min <= 100 && yAxis.max >= 100 && activeValues.length > 0;
+
+  const visibleLabelIndices = useMemo(
+    () => getVisibleLabelIndices(pointCount, pointCount <= 10),
+    [pointCount],
+  );
+
+  const visibleXAxisIndices = useMemo(
+    () => getVisibleXAxisIndices(pointCount),
+    [pointCount],
+  );
+
+  const labelLayoutMap = useMemo(() => {
+    if (!showValueLabels) return new Map<string, ChartLabelLayout>();
+
+    const inputs: ChartLabelInput[] = [];
+
+    chartData.confirmedSeries.values.forEach((value, index) => {
+      if (value == null || !visibleLabelIndices.has(index)) return;
+      inputs.push({
+        id: `${chartData.confirmedSeries.id}-point-${index}`,
+        x: scaleX(index, pointCount, innerWidth),
+        anchorY: scaleY(value, yAxis.min, yAxis.max, innerHeight),
+        value,
+        color: chartData.confirmedSeries.color,
+        preferredPlacement: "above",
+        priority: 0,
+      });
+    });
+
+    selectedCompanies.forEach((company, companyIndex) => {
+      company.values.forEach((value, index) => {
+        if (value == null || !visibleLabelIndices.has(index)) return;
+        inputs.push({
+          id: `${company.id}-point-${index}`,
+          x: scaleX(index, pointCount, innerWidth),
+          anchorY: scaleY(value, yAxis.min, yAxis.max, innerHeight),
+          value,
+          color: company.color,
+          preferredPlacement: companyIndex % 2 === 0 ? "below" : "above",
+          priority: 1 + companyIndex,
+        });
+      });
+    });
+
+    const layouts = layoutChartDataLabels(inputs, {
+      width: innerWidth,
+      height: innerHeight,
+    });
+    return new Map(layouts.map((layout) => [layout.id, layout]));
+  }, [
+    chartData.confirmedSeries,
+    selectedCompanies,
+    showValueLabels,
+    visibleLabelIndices,
+    pointCount,
+    innerWidth,
+    innerHeight,
+    yAxis.min,
+    yAxis.max,
+  ]);
+
+  const tooltipEntries = useMemo((): TooltipEntry[] => {
+    if (hoverIndex == null) return [];
+    const entries: TooltipEntry[] = [];
+    const confirmed = chartData.confirmedSeries.values[hoverIndex];
+    if (confirmed != null) {
+      entries.push({
+        label: chartData.confirmedSeries.label,
+        color: chartData.confirmedSeries.color,
+        value: confirmed,
+      });
+    }
+    for (const company of selectedCompanies) {
+      const value = company.values[hoverIndex];
+      if (value != null) {
+        entries.push({ label: company.label, color: company.color, value });
+      }
+    }
+    return entries;
+  }, [hoverIndex, chartData.confirmedSeries, selectedCompanies]);
+
+  const hoveredBidTitle = useMemo(() => {
+    if (hoverIndex == null) return null;
+    const round = `입찰 ${hoverIndex + 1}회`;
+    const bidName = items[hoverIndex]?.bidName?.trim();
+    return bidName ? `${round} : ${bidName}` : round;
+  }, [hoverIndex, items]);
 
   function toggleCompany(companyId: string) {
     setSelectedCompanyIds((prev) =>
@@ -339,6 +443,26 @@ export function BidOpeningResultsChartModal({
         : [...prev, companyId],
     );
   }
+
+  function handleColumnHover(
+    index: number,
+    event: React.MouseEvent<SVGRectElement>,
+  ) {
+    setHoverIndex(index);
+    const container = chartContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setTooltipPos({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      maxX: rect.width - 180,
+    });
+  }
+
+  const hoverGuideX =
+    hoverIndex != null
+      ? scaleX(hoverIndex, pointCount, innerWidth)
+      : null;
 
   return (
     <div
@@ -351,9 +475,17 @@ export function BidOpeningResultsChartModal({
       >
         <div className="flex items-center justify-between bg-gradient-to-r from-[#004b87] to-[#0066a8] px-6 py-5 text-white">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">투찰율 그래프</h2>
+            <h2 className="text-xl font-semibold tracking-tight">
+              투찰율 그래프
+              {categoryName ? (
+                <span className="ml-2 text-lg font-medium text-white/90">
+                  · {categoryName}
+                </span>
+              ) : null}
+            </h2>
             <p className="mt-1 text-sm text-white/75">
-              확정예가 대비 투찰율 추이 · 입찰일 순
+              선택 구분 기준 · 확정예가 대비 투찰율 추이 · 입찰일 순 · 포인트에
+              마우스를 올리면 수치를 확인할 수 있습니다
             </p>
           </div>
           <button
@@ -381,9 +513,27 @@ export function BidOpeningResultsChartModal({
           ) : (
             <>
               <div className="mb-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-                <p className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                  표시 회사
-                </p>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                    표시 회사
+                  </p>
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={showValueLabels}
+                      onChange={(event) =>
+                        setLabelPreference(event.target.checked ? "on" : "off")
+                      }
+                      className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#004b87]/30"
+                    />
+                    차트에 수치 표시
+                    {pointCount > 10 ? (
+                      <span className="text-xs text-slate-400">
+                        (많을 때는 간격을 두어 표시)
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="inline-flex items-center gap-2 rounded-full border border-[#7c5cbf]/30 bg-[#7c5cbf]/8 px-3 py-1.5 text-sm font-medium text-[#5b3f96]">
                     <span className="inline-block size-2.5 rotate-45 bg-[#7c5cbf]" />
@@ -426,12 +576,56 @@ export function BidOpeningResultsChartModal({
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 shadow-inner">
+              <div
+                ref={chartContainerRef}
+                className="relative overflow-x-auto rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 shadow-inner"
+              >
+                {hoverIndex != null && tooltipEntries.length > 0 ? (
+                  <div
+                    className="pointer-events-none absolute z-10 max-w-[min(24rem,calc(100%-1rem))] rounded-xl border border-slate-200 bg-white/98 px-3 py-2.5 shadow-lg backdrop-blur-sm"
+                    style={{
+                      left: Math.min(
+                        Math.max(tooltipPos.x + 12, 8),
+                        tooltipPos.maxX,
+                      ),
+                      top: Math.max(tooltipPos.y - 8, 8),
+                      transform: "translateY(-100%)",
+                    }}
+                  >
+                    <p className="mb-2 text-xs font-semibold leading-snug text-slate-500">
+                      {hoveredBidTitle}
+                    </p>
+                    <ul className="space-y-1.5">
+                      {tooltipEntries.map((entry) => (
+                        <li
+                          key={entry.label}
+                          className="flex items-center justify-between gap-4 text-sm"
+                        >
+                          <span className="flex min-w-0 items-center gap-2 text-slate-700">
+                            <span
+                              className="inline-block size-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="truncate">{entry.label}</span>
+                          </span>
+                          <span
+                            className="shrink-0 font-semibold tabular-nums"
+                            style={{ color: entry.color }}
+                          >
+                            {formatChartRateLabel(entry.value)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
                 <svg
                   viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
                   className="mx-auto min-w-[1380px] w-full"
                   role="img"
                   aria-label="확정예가 및 투찰율 비교 차트"
+                  onMouseLeave={() => setHoverIndex(null)}
                 >
                   <defs>
                     <linearGradient
@@ -538,6 +732,8 @@ export function BidOpeningResultsChartModal({
                       pointCount={pointCount}
                       showArea
                       dashed
+                      labelLayoutMap={labelLayoutMap}
+                      highlightedIndex={hoverIndex}
                     />
 
                     {selectedCompanies.map((company) => (
@@ -550,28 +746,46 @@ export function BidOpeningResultsChartModal({
                         yMin={yAxis.min}
                         yMax={yAxis.max}
                         pointCount={pointCount}
+                        labelLayoutMap={labelLayoutMap}
+                        highlightedIndex={hoverIndex}
                       />
                     ))}
 
+                    {hoverGuideX != null ? (
+                      <line
+                        x1={hoverGuideX}
+                        x2={hoverGuideX}
+                        y1={0}
+                        y2={innerHeight}
+                        stroke="#004b87"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 4"
+                        opacity={0.45}
+                        pointerEvents="none"
+                      />
+                    ) : null}
+
                     {chartData.pointLabels.map((label, index) => {
+                      if (!visibleXAxisIndices.has(index)) return null;
                       const x = scaleX(index, pointCount, innerWidth);
+                      const isHovered = hoverIndex === index;
                       return (
-                        <g key={`x-label-${label}`}>
+                        <g key={`x-label-${label}-${index}`}>
                           <line
                             x1={x}
                             x2={x}
                             y1={innerHeight}
                             y2={innerHeight + 6}
-                            stroke="#94a3b8"
-                            strokeWidth={1.5}
+                            stroke={isHovered ? "#004b87" : "#94a3b8"}
+                            strokeWidth={isHovered ? 2 : 1.5}
                           />
                           <text
                             x={x}
                             y={innerHeight + 28}
                             textAnchor="middle"
                             fontSize={14}
-                            fill="#475569"
-                            fontWeight={500}
+                            fill={isHovered ? "#004b87" : "#475569"}
+                            fontWeight={isHovered ? 700 : 500}
                           >
                             {label}
                           </text>
@@ -589,6 +803,40 @@ export function BidOpeningResultsChartModal({
                     >
                       입찰 순번
                     </text>
+
+                    {pointCount > 0
+                      ? Array.from({ length: pointCount }, (_, index) => {
+                          const columnWidth =
+                            pointCount <= 1
+                              ? innerWidth
+                              : innerWidth / (pointCount - 1);
+                          const x =
+                            pointCount <= 1
+                              ? 0
+                              : scaleX(index, pointCount, innerWidth) -
+                                columnWidth / 2;
+                          return (
+                            <rect
+                              key={`hover-col-${index}`}
+                              x={Math.max(0, x)}
+                              y={0}
+                              width={
+                                pointCount <= 1
+                                  ? innerWidth
+                                  : Math.min(columnWidth, innerWidth - Math.max(0, x))
+                              }
+                              height={innerHeight}
+                              fill="transparent"
+                              onMouseEnter={(event) =>
+                                handleColumnHover(index, event)
+                              }
+                              onMouseMove={(event) =>
+                                handleColumnHover(index, event)
+                              }
+                            />
+                          );
+                        })
+                      : null}
                   </g>
 
                   <text

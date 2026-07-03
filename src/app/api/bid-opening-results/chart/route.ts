@@ -23,10 +23,17 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const categoryId = searchParams.get("categoryId");
+  const categoryId = searchParams.get("categoryId")?.trim() || null;
+
+  if (!categoryId) {
+    return NextResponse.json(
+      { error: "그래프·비교는 구분을 선택한 뒤 사용할 수 있습니다." },
+      { status: 400 },
+    );
+  }
 
   const { items, error } = await listBidOpeningResultsForChart({
-    categoryId: categoryId?.trim() || null,
+    categoryId,
   });
 
   if (error) {
