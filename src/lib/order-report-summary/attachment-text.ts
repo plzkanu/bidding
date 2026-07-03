@@ -1,12 +1,10 @@
 import JSZip from "jszip";
 import {
-  enrichHwpTextForExtraction,
   extractAttachmentPlainText,
   extractHwpDocumentText,
   isHwpFileName,
   isZipFileName,
 } from "@/lib/order-report-summary/hwp-text";
-import { extractHwpTextViaPython } from "@/lib/order-report-summary/hwp-text-python";
 import { EXAONE_MAX_TOTAL_TEXT_CHARS } from "@/lib/order-report-summary/config";
 import { preprocessTextForGemini } from "@/lib/order-report-summary/gemini-text-preprocess";
 import { sanitizeSummaryText } from "@/lib/order-report-summary/text-sanitize";
@@ -97,20 +95,19 @@ function extractPdfText(buffer: Buffer): string {
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
-/** LG엑사원: HWP/HWPX는 PDF 변환 없이 hwpkit(Python)으로 파일 직접 읽기 */
+/** LG엑사원: HWP/HWPX — Node 파서 우선, 실패 시 hwpkit(Python) 폴백 */
 async function extractHwpTextForExaone(
   attachment: SummarizeAttachmentInput,
 ): Promise<{ text: string | null; error: string | null }> {
   try {
-    const raw = await extractHwpTextViaPython(
+    const text = await extractHwpDocumentText(
       attachment.buffer,
       attachment.fileName,
     );
-    const enriched = enrichHwpTextForExtraction(raw);
-    if (!enriched?.trim()) {
+    if (!text?.trim()) {
       return { text: null, error: "추출된 텍스트가 없습니다." };
     }
-    return { text: enriched, error: null };
+    return { text, error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "HWP 텍스트 추출에 실패했습니다.";
@@ -237,7 +234,7 @@ export async function collectAttachmentTextsForExaone(
       const detail =
         extractError?.trim() ||
         (isHwpFileName(attachment.fileName)
-          ? "텍스트 추출 불가 (py -m pip install hwpkit lxml, .env.local에 HWP_CONVERT_PYTHON 설정 후 dev 서버 재시작)"
+          ? "텍스트 추출 불가 (Replit: replit.nix·npm run build 후 Republish, 로컬: py -m pip install hwpkit lxml)"
           : "텍스트 추출 불가");
       skipped.push(`${attachment.fileName} (${detail})`);
       reportAttachmentSkipped(progress, attachment.fileName, detail);

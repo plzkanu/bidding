@@ -21,7 +21,13 @@ export function resolvePythonExecutableCandidates(): string[] {
     return uniqueExisting(candidates);
   }
 
-  return uniqueExisting(["python3", "python"]);
+  const candidates: string[] = [
+    "/run/current-system/sw/bin/python3",
+    "/home/runner/.nix-profile/bin/python3",
+    "python3",
+    "python",
+  ];
+  return uniqueExisting(candidates);
 }
 
 function uniqueExisting(candidates: string[]): string[] {
