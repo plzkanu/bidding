@@ -2,12 +2,14 @@ run = "npm run dev"
 entrypoint = "package.json"
 hidden = [".config", ".next", "node_modules"]
 modules = ["nodejs-22", "python3"]
+onBoot = "node scripts/install-hwp-python-deps.mjs"
 
 [nix]
 channel = "stable-24_11"
+packages = ["python312", "python312Packages.pip"]
 
 [deployment]
-build = ["sh", "-c", "npm run build && python3 -m pip install -r scripts/requirements-hwp.txt"]
+build = ["npm", "run", "build"]
 run = ["npm", "run", "start"]
 deploymentTarget = "cloudrun"
 

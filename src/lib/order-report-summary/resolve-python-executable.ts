@@ -1,15 +1,25 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+const HWP_VENV_DIR = ".venv-hwp";
+
+function getProjectVenvPython(): string {
+  return process.platform === "win32"
+    ? path.join(process.cwd(), HWP_VENV_DIR, "Scripts", "python.exe")
+    : path.join(process.cwd(), HWP_VENV_DIR, "bin", "python3");
+}
+
 /** HWP_CONVERT_PYTHON / PYTHON 미설정 시 시도할 Python 실행 파일 후보 (순서대로) */
 export function resolvePythonExecutableCandidates(): string[] {
   const fromEnv =
     process.env.HWP_CONVERT_PYTHON?.trim() || process.env.PYTHON?.trim();
   if (fromEnv) return [fromEnv];
 
+  const venvPython = getProjectVenvPython();
+
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA;
-    const candidates: string[] = [];
+    const candidates: string[] = [venvPython];
     if (localAppData) {
       for (const version of ["Python314", "Python313", "Python312", "Python311"]) {
         candidates.push(
@@ -22,6 +32,7 @@ export function resolvePythonExecutableCandidates(): string[] {
   }
 
   const candidates: string[] = [
+    venvPython,
     "/run/current-system/sw/bin/python3",
     "/home/runner/.nix-profile/bin/python3",
     "python3",
