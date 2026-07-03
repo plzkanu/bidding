@@ -21,16 +21,16 @@ import {
 } from "@/lib/bid-opening-results-format";
 
 const PAGE_SIZE = 20;
-const LIST_TABLE_CLASS = "w-full min-w-[76rem] table-auto text-left text-xs";
+const LIST_TABLE_CLASS = "w-full min-w-[88rem] table-auto text-left text-xs";
 const CELL_PAD = "px-4 py-2.5";
-const CATEGORY_COL_CLASS = `${CELL_PAD} min-w-[8.5rem] whitespace-nowrap`;
-const NOTICE_NO_COL_CLASS = `${CELL_PAD} min-w-[8.5rem] whitespace-nowrap`;
-const BID_NAME_COL_CLASS = `${CELL_PAD} min-w-[18rem] max-w-[36rem] break-words align-top`;
-const BID_DATE_COL_CLASS = `${CELL_PAD} min-w-[6rem] whitespace-nowrap tabular-nums`;
-const AMOUNT_COL_CLASS = `${CELL_PAD} min-w-[8.5rem] whitespace-nowrap text-right tabular-nums`;
-const RATE_COL_CLASS = `${CELL_PAD} min-w-[6.5rem] whitespace-nowrap text-right tabular-nums`;
-const WINNER_COL_CLASS = `${CELL_PAD} min-w-[7.5rem] whitespace-nowrap`;
-const BID_COUNT_COL_CLASS = `${CELL_PAD} min-w-[5rem] whitespace-nowrap text-center`;
+const CATEGORY_COL_CLASS = `${CELL_PAD} min-w-[7rem] whitespace-nowrap`;
+const NOTICE_NO_COL_CLASS = `${CELL_PAD} min-w-[7.5rem] whitespace-nowrap`;
+const BID_NAME_COL_CLASS = `${CELL_PAD} min-w-[36rem] whitespace-nowrap`;
+const BID_DATE_COL_CLASS = `${CELL_PAD} min-w-[5.25rem] whitespace-nowrap tabular-nums`;
+const AMOUNT_COL_CLASS = `${CELL_PAD} min-w-[7.25rem] whitespace-nowrap text-right tabular-nums`;
+const RATE_COL_CLASS = `${CELL_PAD} min-w-[5.75rem] whitespace-nowrap text-right tabular-nums`;
+const WINNER_COL_CLASS = `${CELL_PAD} min-w-[6.5rem] whitespace-nowrap`;
+const BID_COUNT_COL_CLASS = `${CELL_PAD} min-w-[4.25rem] whitespace-nowrap text-center`;
 const OUR_AWARD_ROW_CLASS =
   "bg-[#004b87] text-white hover:bg-[#003a6a]";
 const OUR_BID_ROW_CLASS = "bg-[#009ada]/5 hover:bg-[#009ada]/10";
@@ -527,7 +527,9 @@ export function BidOpeningResultsList() {
                 >
                   <td className={CATEGORY_COL_CLASS}>{item.categoryName}</td>
                   <td className={NOTICE_NO_COL_CLASS}>{item.noticeNo}</td>
-                  <td className={BID_NAME_COL_CLASS}>{item.bidName}</td>
+                  <td className={BID_NAME_COL_CLASS} title={item.bidName}>
+                    {item.bidName}
+                  </td>
                   <td className={BID_DATE_COL_CLASS}>
                     {formatOpeningDate(item.bidDate)}
                   </td>

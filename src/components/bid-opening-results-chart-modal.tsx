@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BidOpeningResult } from "@/lib/bid-opening-results";
 import {
+  appendChartPeriodSearchParams,
+  CHART_PERIOD_PRESETS,
+  DEFAULT_CHART_PERIOD,
+  formatChartPeriodSummary,
+  getDefaultCustomDateRange,
+  resolveChartPeriodRange,
+  type ChartPeriodPreset,
+} from "@/lib/bid-opening-results-chart-period";
+import {
   buildOpeningResultsChartData,
   computeChartYAxis,
   formatChartRateLabel,
@@ -265,9 +274,21 @@ export function BidOpeningResultsChartModal({
   categoryName,
   onClose,
 }: BidOpeningResultsChartModalProps) {
+  const defaultCustomRange = useMemo(() => getDefaultCustomDateRange(), []);
   const [items, setItems] = useState<BidOpeningResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [periodPreset, setPeriodPreset] =
+    useState<ChartPeriodPreset>(DEFAULT_CHART_PERIOD);
+  const [customDateFrom, setCustomDateFrom] = useState(
+    defaultCustomRange.dateFrom,
+  );
+  const [customDateTo, setCustomDateTo] = useState(defaultCustomRange.dateTo);
+  const [appliedCustomRange, setAppliedCustomRange] = useState<{
+    dateFrom: string;
+    dateTo: string;
+  } | null>(null);
+  const [periodError, setPeriodError] = useState("");
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [labelPreference, setLabelPreference] = useState<"auto" | "on" | "off">(
     "auto",
@@ -276,7 +297,51 @@ export function BidOpeningResultsChartModal({
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0, maxX: 600 });
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
+  const activePeriodRange = useMemo(() => {
+    if (periodPreset === "custom") {
+      if (!appliedCustomRange) {
+        return {
+          dateFrom: null,
+          dateTo: null,
+          error: null as string | null,
+          ready: false,
+        };
+      }
+      return {
+        dateFrom: appliedCustomRange.dateFrom,
+        dateTo: appliedCustomRange.dateTo,
+        error: null,
+        ready: true,
+      };
+    }
+
+    const resolved = resolveChartPeriodRange({ preset: periodPreset });
+    return {
+      dateFrom: resolved.dateFrom,
+      dateTo: resolved.dateTo,
+      error: resolved.error,
+      ready: !resolved.error,
+    };
+  }, [appliedCustomRange, periodPreset]);
+
+  const periodSummary = useMemo(
+    () =>
+      formatChartPeriodSummary(
+        periodPreset,
+        activePeriodRange.dateFrom,
+        activePeriodRange.dateTo,
+      ),
+    [activePeriodRange.dateFrom, activePeriodRange.dateTo, periodPreset],
+  );
+
   useEffect(() => {
+    if (!activePeriodRange.ready) {
+      setItems([]);
+      setIsLoading(false);
+      setError("");
+      return;
+    }
+
     async function loadChartData() {
       setIsLoading(true);
       setError("");
@@ -285,6 +350,10 @@ export function BidOpeningResultsChartModal({
         if (categoryId) {
           params.set("categoryId", categoryId);
         }
+        appendChartPeriodSearchParams(params, {
+          dateFrom: activePeriodRange.dateFrom,
+          dateTo: activePeriodRange.dateTo,
+        });
         const response = await fetch(
           `/api/bid-opening-results/chart?${params.toString()}`,
         );
@@ -304,7 +373,42 @@ export function BidOpeningResultsChartModal({
       }
     }
     loadChartData();
-  }, [categoryId]);
+  }, [
+    activePeriodRange.dateFrom,
+    activePeriodRange.dateTo,
+    activePeriodRange.ready,
+    categoryId,
+  ]);
+
+  function handlePeriodPresetChange(preset: ChartPeriodPreset) {
+    setPeriodPreset(preset);
+    setPeriodError("");
+    if (preset === "custom") {
+      const range = getDefaultCustomDateRange();
+      setCustomDateFrom(range.dateFrom);
+      setCustomDateTo(range.dateTo);
+      setAppliedCustomRange(range);
+      return;
+    }
+    setAppliedCustomRange(null);
+  }
+
+  function handleCustomPeriodApply() {
+    const resolved = resolveChartPeriodRange({
+      preset: "custom",
+      customDateFrom,
+      customDateTo,
+    });
+    if (resolved.error) {
+      setPeriodError(resolved.error);
+      return;
+    }
+    setPeriodError("");
+    setAppliedCustomRange({
+      dateFrom: resolved.dateFrom!,
+      dateTo: resolved.dateTo!,
+    });
+  }
 
   const chartData = useMemo(
     () => buildOpeningResultsChartData(items),
@@ -484,8 +588,8 @@ export function BidOpeningResultsChartModal({
               ) : null}
             </h2>
             <p className="mt-1 text-sm text-white/75">
-              선택 구분 기준 · 확정예가 대비 투찰율 추이 · 입찰일 순 · 포인트에
-              마우스를 올리면 수치를 확인할 수 있습니다
+              선택 구분 기준 · {periodSummary || "최근 1년"} · 확정예가 대비 투찰율
+              추이 · 입찰일 순
             </p>
           </div>
           <button
@@ -498,6 +602,63 @@ export function BidOpeningResultsChartModal({
         </div>
 
         <div className="bg-slate-50/80 px-5 py-5">
+          <div className="mb-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+            <p className="mb-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              조회 기간
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {CHART_PERIOD_PRESETS.map((preset) => {
+                const selected = periodPreset === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handlePeriodPresetChange(preset.id)}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                      selected
+                        ? "border-[#004b87] bg-[#004b87] text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-[#009ada]/40 hover:text-[#004b87]"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            {periodPreset === "custom" ? (
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
+                  시작일
+                  <input
+                    type="date"
+                    value={customDateFrom}
+                    onChange={(event) => setCustomDateFrom(event.target.value)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-slate-500">
+                  종료일
+                  <input
+                    type="date"
+                    value={customDateTo}
+                    onChange={(event) => setCustomDateTo(event.target.value)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleCustomPeriodApply}
+                  className="rounded-lg bg-[#004b87] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#003a6a]"
+                >
+                  조회
+                </button>
+              </div>
+            ) : null}
+            {periodError ? (
+              <p className="mt-3 text-sm text-red-600">{periodError}</p>
+            ) : null}
+          </div>
+
           {isLoading ? (
             <p className="py-24 text-center text-sm text-slate-400">
               차트 데이터를 불러오는 중…
@@ -508,7 +669,9 @@ export function BidOpeningResultsChartModal({
             </p>
           ) : items.length === 0 ? (
             <p className="py-24 text-center text-sm text-slate-500">
-              표시할 개찰결과가 없습니다.
+              {periodPreset === "custom" && !appliedCustomRange
+                ? "시작일·종료일을 입력한 뒤 조회를 눌러 주세요."
+                : "선택한 기간에 표시할 개찰결과가 없습니다."}
             </p>
           ) : (
             <>

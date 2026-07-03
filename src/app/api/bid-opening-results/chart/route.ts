@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
+import { isValidIsoDate } from "@/lib/bid-opening-results-chart-period";
 import { listBidOpeningResultsForChart } from "@/lib/bid-opening-results";
 import {
   getSupabaseConfigError,
@@ -24,6 +25,8 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const categoryId = searchParams.get("categoryId")?.trim() || null;
+  const dateFrom = searchParams.get("dateFrom")?.trim() || null;
+  const dateTo = searchParams.get("dateTo")?.trim() || null;
 
   if (!categoryId) {
     return NextResponse.json(
@@ -32,8 +35,29 @@ export async function GET(request: Request) {
     );
   }
 
+  if (dateFrom && !isValidIsoDate(dateFrom)) {
+    return NextResponse.json(
+      { error: "시작일 형식이 올바르지 않습니다." },
+      { status: 400 },
+    );
+  }
+  if (dateTo && !isValidIsoDate(dateTo)) {
+    return NextResponse.json(
+      { error: "종료일 형식이 올바르지 않습니다." },
+      { status: 400 },
+    );
+  }
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    return NextResponse.json(
+      { error: "시작일이 종료일보다 늦을 수 없습니다." },
+      { status: 400 },
+    );
+  }
+
   const { items, error } = await listBidOpeningResultsForChart({
     categoryId,
+    dateFrom,
+    dateTo,
   });
 
   if (error) {

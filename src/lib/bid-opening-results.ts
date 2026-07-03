@@ -504,6 +504,8 @@ export async function listBidOpeningResultsForExport(options?: {
 
 export async function listBidOpeningResultsForChart(options?: {
   categoryId?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
 }): Promise<{ items: BidOpeningResult[]; error: string | null }> {
   const configError = supabaseNotReadyError();
   if (configError) {
@@ -521,6 +523,13 @@ export async function listBidOpeningResultsForChart(options?: {
 
     if (options?.categoryId) {
       query = query.eq("category_id", options.categoryId);
+    }
+
+    if (options?.dateFrom) {
+      query = query.gte("bid_date", options.dateFrom);
+    }
+    if (options?.dateTo) {
+      query = query.lte("bid_date", options.dateTo);
     }
 
     const { data, error } = await query;
