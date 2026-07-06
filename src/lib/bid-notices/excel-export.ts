@@ -19,6 +19,7 @@ const TYPE_HEADERS: Record<BidNoticeType, readonly string[]> = {
   BID: ["상태", "구분", "입찰마감"],
   PRIVATE: ["주요구매내용"],
   PLAN_SPEC: [],
+  SPEC_REVIEW: [],
 };
 
 const TAIL_HEADERS = ["부서", "공고일시", "공고기간"] as const;

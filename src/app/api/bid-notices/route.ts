@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
-import { listKhnpBidNotices } from "@/lib/bid-notices/khnp";
+import {
+  isNoticeTypeValidForDataset,
+  resolveBidNoticeDatasetForSiteId,
+} from "@/lib/bid-notices/dataset";
+import { listBidNotices } from "@/lib/bid-notices/notices";
 import {
   createManualBidNotice,
   type ManualBidNoticeInput,
@@ -71,9 +75,22 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!noticeType || !VALID_NOTICE_TYPES.includes(noticeType)) {
+  if (!noticeType) {
     return NextResponse.json(
-      { error: "noticeType은 BID, PRIVATE, PLAN_SPEC 중 하나여야 합니다." },
+      { error: "noticeType은 필수입니다." },
+      { status: 400 },
+    );
+  }
+
+  const dataset = await resolveBidNoticeDatasetForSiteId(siteId);
+  if (!isNoticeTypeValidForDataset(dataset, noticeType)) {
+    return NextResponse.json(
+      {
+        error:
+          dataset === "srm"
+            ? "noticeType은 BID, SPEC_REVIEW 중 하나여야 합니다."
+            : "noticeType은 BID, PRIVATE, PLAN_SPEC 중 하나여야 합니다.",
+      },
       { status: 400 },
     );
   }
@@ -85,7 +102,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const { notices, total, error } = await listKhnpBidNotices({
+  const { notices, total, error } = await listBidNotices({
     siteId,
     noticeType,
     page: Number.isFinite(page) ? page : 1,

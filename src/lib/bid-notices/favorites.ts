@@ -1,6 +1,11 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import {
+  getNoticeTableName,
+  resolveBidNoticeDatasetForSiteId,
+} from "./dataset";
 import type { BidNoticeType } from "./types";
+import { getBidNoticeById } from "./notices";
 
 export const FAVORITES_TABLE_SETUP_MESSAGE =
   "관심공고를 저장할 수 없습니다. Supabase에 user_bid_favorites 테이블이 필요합니다. 관리자에게 문의하거나 supabase/migrations/002_user_bid_favorites.sql을 적용해 주세요.";
@@ -29,6 +34,58 @@ function supabaseNotReadyError(): string | null {
   return null;
 }
 
+async function filterFavoriteNoticeIds(
+  noticeIds: string[],
+  filters?: { siteId?: number; noticeType?: BidNoticeType },
+): Promise<{ noticeIds: string[]; error: string | null }> {
+  if (noticeIds.length === 0) {
+    return { noticeIds: [], error: null };
+  }
+  if (filters?.siteId == null && !filters?.noticeType) {
+    return { noticeIds, error: null };
+  }
+
+  const dataset =
+    filters?.siteId != null
+      ? await resolveBidNoticeDatasetForSiteId(filters.siteId)
+      : "khnp";
+
+  const tables =
+    filters?.siteId != null
+      ? [getNoticeTableName(dataset)]
+      : ["khnp_bid_notice", "srm_bid_notice"];
+
+  const matched = new Set<string>();
+
+  for (const table of tables) {
+    let query = createServerClient()
+      .from(table)
+      .select("id")
+      .in("id", noticeIds)
+      .eq("is_deleted", false);
+
+    if (filters?.siteId != null) {
+      query = query.eq("site_id", filters.siteId);
+    }
+    if (filters?.noticeType) {
+      query = query.eq("notice_type", filters.noticeType);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      return { noticeIds: [], error: normalizeFavoritesError(error.message) };
+    }
+    for (const row of data ?? []) {
+      matched.add(row.id as string);
+    }
+  }
+
+  return {
+    noticeIds: noticeIds.filter((id) => matched.has(id)),
+    error: null,
+  };
+}
+
 export async function getFavoriteNoticeIds(
   userId: string,
   filters?: { siteId?: number; noticeType?: BidNoticeType },
@@ -40,27 +97,17 @@ export async function getFavoriteNoticeIds(
 
   try {
     const supabase = createServerClient();
-    let query = supabase
+    const { data, error } = await supabase
       .from("user_bid_favorites")
-      .select("notice_id, khnp_bid_notice!inner(site_id, notice_type, is_deleted)")
-      .eq("user_id", userId)
-      .eq("khnp_bid_notice.is_deleted", false);
-
-    if (filters?.siteId != null) {
-      query = query.eq("khnp_bid_notice.site_id", filters.siteId);
-    }
-    if (filters?.noticeType) {
-      query = query.eq("khnp_bid_notice.notice_type", filters.noticeType);
-    }
-
-    const { data, error } = await query;
+      .select("notice_id")
+      .eq("user_id", userId);
 
     if (error) {
       return { noticeIds: [], error: normalizeFavoritesError(error.message) };
     }
 
     const noticeIds = (data ?? []).map((row) => row.notice_id as string);
-    return { noticeIds, error: null };
+    return filterFavoriteNoticeIds(noticeIds, filters);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "관심공고 조회에 실패했습니다.";
@@ -108,22 +155,15 @@ export async function addNoticeFavorite(
   }
 
   try {
-    const supabase = createServerClient();
-
-    const { data: notice, error: noticeError } = await supabase
-      .from("khnp_bid_notice")
-      .select("id")
-      .eq("id", noticeId)
-      .eq("is_deleted", false)
-      .maybeSingle();
-
+    const { notice, error: noticeError } = await getBidNoticeById(noticeId);
     if (noticeError) {
-      return { error: normalizeFavoritesError(noticeError.message) };
+      return { error: normalizeFavoritesError(noticeError) };
     }
     if (!notice) {
       return { error: "공고를 찾을 수 없습니다." };
     }
 
+    const supabase = createServerClient();
     const { error } = await supabase.from("user_bid_favorites").insert({
       user_id: userId,
       notice_id: noticeId,

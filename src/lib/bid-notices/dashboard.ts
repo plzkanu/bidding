@@ -35,31 +35,22 @@ import {
 
 } from "./deadline";
 
-import type {
+import {
+  fetchBidNoticesForSite,
+} from "./notice-repository";
+import {
+  getNoticeSelect,
+  getNoticeTableName,
+  getNoticeTypesForDataset,
+  resolveBidNoticeDatasetForSiteId,
+} from "./dataset";
+import { normalizeSrmBidNoticeRow } from "./normalize-srm";
+import type { BidNoticeType, KhnpBidNoticeRow, SrmBidNoticeRow } from "./types";
 
-  BidNoticeType,
-
-  KhnpBidNoticeRow,
-
-} from "./types";
-
-
-
-const NOTICE_TYPES: BidNoticeType[] = ["BID", "PRIVATE", "PLAN_SPEC"];
-
-
-
-const NOTICE_SELECT = `
-
-  *,
-
-  khnp_bid_open (*),
-
-  khnp_bid_private (*),
-
-  khnp_bid_plan_spec (*)
-
-`;
+export {
+  getApproachingNoticeIds,
+  getNoticeIdsByDeadlineStatus,
+} from "./notice-deadline-ids";
 
 
 
@@ -194,15 +185,10 @@ export interface DashboardData {
 
 
 function emptyCounts(): ApproachingDeadlineCounts {
-
   return {
-
-    week: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0 },
-
-    day: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0 },
-
+    week: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0, SPEC_REVIEW: 0 },
+    day: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0, SPEC_REVIEW: 0 },
   };
-
 }
 
 
@@ -227,19 +213,25 @@ function emptyKpis(): DashboardKpis {
 
 
 
-function resolveSiteName(
-
-  crawlSites: { site_name: string } | { site_name: string }[] | null,
-
-): string | null {
-
-  if (crawlSites == null) return null;
-
-  return Array.isArray(crawlSites) ? crawlSites[0]?.site_name ?? null : crawlSites.site_name;
-
+function mapDashboardNoticeRow(
+  dataset: "khnp" | "srm",
+  row: (KhnpBidNoticeRow | SrmBidNoticeRow) & {
+    crawl_sites: { site_name: string } | { site_name: string }[] | null;
+  },
+): KhnpBidNoticeRow {
+  const { crawl_sites: _crawlSites, ...notice } = row;
+  if (dataset === "srm") {
+    return normalizeSrmBidNoticeRow(notice as SrmBidNoticeRow);
+  }
+  return { ...(notice as KhnpBidNoticeRow), dataset: "khnp" };
 }
 
-
+function resolveSiteName(
+  crawlSites: { site_name: string } | { site_name: string }[] | null,
+): string | null {
+  if (crawlSites == null) return null;
+  return Array.isArray(crawlSites) ? crawlSites[0]?.site_name ?? null : crawlSites.site_name;
+}
 
 function getKstMonthRange(now: Date = new Date()): { start: string; end: string } {
 
@@ -268,338 +260,6 @@ function getKstMonthRange(now: Date = new Date()): { start: string; end: string 
   const end = `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
 
   return { start, end };
-
-}
-
-
-
-async function fetchNoticesForSite(
-
-  siteId: number,
-
-  noticeType: BidNoticeType,
-
-): Promise<{ notices: KhnpBidNoticeRow[]; error: string | null }> {
-
-  const supabase = createServerClient();
-
-  const { data, error } = await supabase
-
-    .from("khnp_bid_notice")
-
-    .select(NOTICE_SELECT)
-
-    .eq("site_id", siteId)
-
-    .eq("notice_type", noticeType)
-
-    .eq("is_deleted", false)
-
-    .order("notice_date", { ascending: false, nullsFirst: false });
-
-
-
-  if (error) {
-
-    return { notices: [], error: error.message };
-
-  }
-
-
-
-  return { notices: (data ?? []) as KhnpBidNoticeRow[], error: null };
-
-}
-
-
-
-export async function getApproachingNoticeIds(options: {
-
-  siteId: number;
-
-  noticeType: BidNoticeType;
-
-  window: DeadlineWindow;
-
-  userId?: string;
-
-  favoritesOnly?: boolean;
-
-}): Promise<{ noticeIds: string[]; error: string | null }> {
-
-  if (!isSupabaseConfigured()) {
-
-    return { noticeIds: [], error: null };
-
-  }
-
-
-
-  let notices: KhnpBidNoticeRow[];
-
-
-
-  if (options.favoritesOnly) {
-
-    if (!options.userId) {
-
-      return { noticeIds: [], error: "로그인이 필요합니다." };
-
-    }
-
-
-
-    const { noticeIds: favoriteIds, error: favError } =
-
-      await getFavoriteNoticeIds(options.userId, {
-
-        siteId: options.siteId,
-
-        noticeType: options.noticeType,
-
-      });
-
-    if (favError) {
-
-      return { noticeIds: [], error: favError };
-
-    }
-
-    if (favoriteIds.length === 0) {
-
-      return { noticeIds: [], error: null };
-
-    }
-
-
-
-    const supabase = createServerClient();
-
-    const { data, error: listError } = await supabase
-
-      .from("khnp_bid_notice")
-
-      .select(NOTICE_SELECT)
-
-      .in("id", favoriteIds)
-
-      .eq("site_id", options.siteId)
-
-      .eq("notice_type", options.noticeType)
-
-      .eq("is_deleted", false);
-
-
-
-    if (listError) {
-
-      return { noticeIds: [], error: listError.message };
-
-    }
-
-
-
-    notices = (data ?? []) as KhnpBidNoticeRow[];
-
-  } else {
-
-    const { notices: siteNotices, error } = await fetchNoticesForSite(
-
-      options.siteId,
-
-      options.noticeType,
-
-    );
-
-    if (error) {
-
-      return { noticeIds: [], error };
-
-    }
-
-    notices = siteNotices;
-
-  }
-
-
-
-  const now = new Date();
-
-  const ids = notices
-
-    .filter((row) => isApproachingDeadline(row, options.window, now))
-
-    .sort((a, b) => {
-
-      const da = getNoticeDeadlineSortKey(a);
-
-      const db = getNoticeDeadlineSortKey(b);
-
-      return da - db;
-
-    })
-
-    .map((row) => row.id);
-
-
-
-  return { noticeIds: ids, error: null };
-
-}
-
-
-
-export async function getNoticeIdsByDeadlineStatus(options: {
-
-  siteId: number;
-
-  noticeType: BidNoticeType;
-
-  status: DeadlineListFilter;
-
-  userId?: string;
-
-  favoritesOnly?: boolean;
-
-}): Promise<{ noticeIds: string[]; error: string | null }> {
-
-  if (!isSupabaseConfigured()) {
-
-    return { noticeIds: [], error: null };
-
-  }
-
-
-
-  let notices: KhnpBidNoticeRow[];
-
-
-
-  if (options.favoritesOnly) {
-
-    if (!options.userId) {
-
-      return { noticeIds: [], error: "로그인이 필요합니다." };
-
-    }
-
-
-
-    const { noticeIds: favoriteIds, error: favError } =
-
-      await getFavoriteNoticeIds(options.userId, {
-
-        siteId: options.siteId,
-
-        noticeType: options.noticeType,
-
-      });
-
-    if (favError) {
-
-      return { noticeIds: [], error: favError };
-
-    }
-
-    if (favoriteIds.length === 0) {
-
-      return { noticeIds: [], error: null };
-
-    }
-
-
-
-    const supabase = createServerClient();
-
-    const { data, error: listError } = await supabase
-
-      .from("khnp_bid_notice")
-
-      .select(NOTICE_SELECT)
-
-      .in("id", favoriteIds)
-
-      .eq("site_id", options.siteId)
-
-      .eq("notice_type", options.noticeType)
-
-      .eq("is_deleted", false);
-
-
-
-    if (listError) {
-
-      return { noticeIds: [], error: listError.message };
-
-    }
-
-
-
-    notices = (data ?? []) as KhnpBidNoticeRow[];
-
-  } else {
-
-    const { notices: siteNotices, error } = await fetchNoticesForSite(
-
-      options.siteId,
-
-      options.noticeType,
-
-    );
-
-    if (error) {
-
-      return { noticeIds: [], error };
-
-    }
-
-    notices = siteNotices;
-
-  }
-
-
-
-  const now = new Date();
-
-  const ids = notices
-
-    .filter((row) =>
-
-      options.status === "expired"
-
-        ? isDeadlineExpired(row, now)
-
-        : !isDeadlineExpired(row, now),
-
-    )
-
-    .sort((a, b) => {
-
-      const dateA = a.notice_date ? new Date(a.notice_date).getTime() : 0;
-
-      const dateB = b.notice_date ? new Date(b.notice_date).getTime() : 0;
-
-      if (dateB !== dateA) return dateB - dateA;
-
-      return (b.notice_no ?? "").localeCompare(a.notice_no ?? "", "ko");
-
-    })
-
-    .map((row) => row.id);
-
-
-
-  return { noticeIds: ids, error: null };
-
-}
-
-
-
-function getNoticeDeadlineSortKey(row: KhnpBidNoticeRow): number {
-
-  const d = getNoticeDeadline(row);
-
-  return d ? d.getTime() : Number.MAX_SAFE_INTEGER;
 
 }
 
@@ -784,6 +444,10 @@ export async function getDashboardData(options: {
   try {
 
     const supabase = createServerClient();
+    const dataset = await resolveBidNoticeDatasetForSiteId(options.siteId);
+    const noticeTable = getNoticeTableName(dataset);
+    const noticeSelect = `${getNoticeSelect(dataset)}, crawl_sites ( site_name )`;
+    const siteNoticeTypes = getNoticeTypesForDataset(dataset);
 
     const { start: monthStart, end: monthEnd } = getKstMonthRange(now);
 
@@ -822,7 +486,7 @@ export async function getDashboardData(options: {
 
       supabase
 
-        .from("khnp_bid_notice")
+        .from(noticeTable)
 
         .select("id", { count: "exact", head: true })
 
@@ -836,9 +500,9 @@ export async function getDashboardData(options: {
 
       supabase
 
-        .from("khnp_bid_notice")
+        .from(noticeTable)
 
-        .select(`${NOTICE_SELECT}, crawl_sites ( site_name )`)
+        .select(noticeSelect)
 
         .eq("site_id", options.siteId)
 
@@ -850,9 +514,9 @@ export async function getDashboardData(options: {
 
       supabase
 
-        .from("khnp_bid_notice")
+        .from(noticeTable)
 
-        .select(`${NOTICE_SELECT}, crawl_sites ( site_name )`)
+        .select(noticeSelect)
 
         .eq("site_id", options.siteId)
 
@@ -950,26 +614,16 @@ export async function getDashboardData(options: {
 
 
 
-    const allSiteNotices = ((recentRows ?? []) as Array<
-
-      KhnpBidNoticeRow & {
-
+    const allSiteNotices = ((recentRows ?? []) as unknown as Array<
+      (KhnpBidNoticeRow | SrmBidNoticeRow) & {
         crawl_sites: { site_name: string } | { site_name: string }[] | null;
-
       }
-
     >).map((row) => {
-
-      const { crawl_sites, ...notice } = row;
-
+      const { crawl_sites } = row;
       return {
-
-        notice: notice as KhnpBidNoticeRow,
-
+        notice: mapDashboardNoticeRow(dataset, row),
         siteName: resolveSiteName(crawl_sites),
-
       };
-
     });
 
 
@@ -988,9 +642,9 @@ export async function getDashboardData(options: {
 
       const { data: favRows, error: favListError } = await supabase
 
-        .from("khnp_bid_notice")
+        .from(noticeTable)
 
-        .select(`${NOTICE_SELECT}, crawl_sites ( site_name )`)
+        .select(noticeSelect)
 
         .in("id", [...favoriteIds])
 
@@ -1031,21 +685,14 @@ export async function getDashboardData(options: {
 
 
       favorites = (favRows ?? []).map((row) => {
-
-        const { crawl_sites, ...notice } = row as KhnpBidNoticeRow & {
-
+        const typedRow = row as unknown as (KhnpBidNoticeRow | SrmBidNoticeRow) & {
           crawl_sites: { site_name: string } | { site_name: string }[] | null;
-
         };
-
+        const { crawl_sites } = typedRow;
         return {
-
-          notice: notice as KhnpBidNoticeRow,
-
+          notice: mapDashboardNoticeRow(dataset, typedRow),
           siteName: resolveSiteName(crawl_sites),
-
         };
-
       });
 
     }
@@ -1058,7 +705,7 @@ export async function getDashboardData(options: {
 
       const noticeType = notice.notice_type;
 
-      if (!NOTICE_TYPES.includes(noticeType)) continue;
+      if (!siteNoticeTypes.includes(noticeType)) continue;
 
       if (isApproachingDeadline(notice, "week", now)) {
 
@@ -1076,7 +723,7 @@ export async function getDashboardData(options: {
 
 
 
-    const urgentDeadlineCount = NOTICE_TYPES.reduce(
+    const urgentDeadlineCount = siteNoticeTypes.reduce(
 
       (sum, type) => sum + approachingCounts.day[type],
 
@@ -1094,26 +741,16 @@ export async function getDashboardData(options: {
 
 
 
-    const calendarNotices = ((calendarRows ?? []) as Array<
-
-      KhnpBidNoticeRow & {
-
+    const calendarNotices = ((calendarRows ?? []) as unknown as Array<
+      (KhnpBidNoticeRow | SrmBidNoticeRow) & {
         crawl_sites: { site_name: string } | { site_name: string }[] | null;
-
       }
-
     >).map((row) => {
-
-      const { crawl_sites, ...notice } = row;
-
+      const { crawl_sites } = row;
       return {
-
-        notice: notice as KhnpBidNoticeRow,
-
+        notice: mapDashboardNoticeRow(dataset, row),
         siteName: resolveSiteName(crawl_sites),
-
       };
-
     });
 
 

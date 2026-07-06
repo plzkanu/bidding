@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BidNoticeDetailModal } from "@/components/bid-notice-detail-modal";
 import { BidNoticeManualFormModal } from "@/components/bid-notice-manual-form";
@@ -15,6 +15,12 @@ import { BidNoticeAssignmentTableCells } from "@/components/bid-notice-assignmen
 import { CrawlSiteSelector } from "@/components/crawl-site-selector";
 import { ScreeningKeywordChips } from "@/components/screening-keyword-chips";
 import type { CrawlSite } from "@/lib/crawl-sites";
+import {
+  ALL_BID_NOTICE_TYPES,
+  getNoticeTypesForDataset,
+  resolveBidNoticeDatasetFromSite,
+  type BidNoticeDataset,
+} from "@/lib/bid-notices/dataset";
 import {
   BID_NOTICE_TYPE_LABELS,
   type BidNoticeType,
@@ -50,7 +56,6 @@ import {
   truncateText,
 } from "@/lib/bid-notices/utils";
 
-const NOTICE_TYPES: BidNoticeType[] = ["BID", "PRIVATE", "PLAN_SPEC"];
 const PAGE_SIZE = 20;
 const EXPORT_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10_000;
@@ -102,7 +107,7 @@ function parseDeadlineWindow(
 }
 
 function parseNoticeType(value: string | null): BidNoticeType | null {
-  if (value && NOTICE_TYPES.includes(value as BidNoticeType)) {
+  if (value && ALL_BID_NOTICE_TYPES.includes(value as BidNoticeType)) {
     return value as BidNoticeType;
   }
   return null;
@@ -213,6 +218,21 @@ export function BidNoticeInquiry({
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const selectedSite = sites.find((s) => s.id === siteId);
+  const siteDataset: BidNoticeDataset = selectedSite
+    ? resolveBidNoticeDatasetFromSite(selectedSite)
+    : "khnp";
+  const siteNoticeTypes = useMemo(
+    () => getNoticeTypesForDataset(siteDataset),
+    [siteDataset],
+  );
+
+  useEffect(() => {
+    if (!siteNoticeTypes.includes(noticeType)) {
+      setNoticeType(siteNoticeTypes[0]);
+      setPage(1);
+    }
+  }, [siteNoticeTypes, noticeType]);
+
   const activeKeywordCount = activeKeywords.length;
 
   const syncNoticeDateInUrl = useCallback(
@@ -1124,7 +1144,7 @@ export function BidNoticeInquiry({
       ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        {NOTICE_TYPES.map((type) => (
+        {siteNoticeTypes.map((type) => (
           <button
             key={type}
             type="button"

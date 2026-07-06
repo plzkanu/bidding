@@ -2,7 +2,8 @@ import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { findDepartmentById } from "@/lib/departments";
 import { findUserById } from "@/lib/users-store";
-import type { BidNoticeType } from "./types";
+import { getBidNoticeById, getBidNoticesByIds } from "./notice-repository";
+import type { BidNoticeType, KhnpBidNoticeRow } from "./types";
 
 export interface BidNoticeAssignment {
   noticeId: string;
@@ -18,12 +19,30 @@ export const ASSIGNMENTS_TABLE_SETUP_MESSAGE =
 
 function isMissingAssignmentsTableError(message: string | undefined): boolean {
   if (!message) return false;
+  if (
+    message.includes("relationship") ||
+    message.includes("Could not find a relationship")
+  ) {
+    return false;
+  }
   return (
     message.includes("bid_notice_assignments") &&
     (message.includes("schema cache") ||
       message.includes("does not exist") ||
       message.includes("Could not find the table"))
   );
+}
+
+function noticeMatchesAssignmentFilters(
+  notice: KhnpBidNoticeRow,
+  filters?: { siteId?: number; noticeType?: BidNoticeType },
+): boolean {
+  if (notice.is_deleted) return false;
+  if (filters?.siteId != null && notice.site_id !== filters.siteId) return false;
+  if (filters?.noticeType && notice.notice_type !== filters.noticeType) {
+    return false;
+  }
+  return true;
 }
 
 export function normalizeAssignmentsError(message: string | undefined): string {
@@ -116,28 +135,32 @@ export async function getAssignmentMap(
 
   try {
     const supabase = createServerClient();
-    let query = supabase
+    const { data, error } = await supabase
       .from("bid_notice_assignments")
       .select(
-        "notice_id, department_id, assignee_user_id, updated_at, departments(name), khnp_bid_notice!inner(site_id, notice_type, is_deleted)",
-      )
-      .eq("khnp_bid_notice.is_deleted", false);
-
-    if (filters?.siteId != null) {
-      query = query.eq("khnp_bid_notice.site_id", filters.siteId);
-    }
-    if (filters?.noticeType) {
-      query = query.eq("khnp_bid_notice.notice_type", filters.noticeType);
-    }
-
-    const { data, error } = await query;
+        "notice_id, department_id, assignee_user_id, updated_at, departments(name)",
+      );
 
     if (error) {
       return { assignments: {}, error: normalizeAssignmentsError(error.message) };
     }
 
-    const rows = (data ?? []).map((row) => mapAssignmentRow(row));
-    const enriched = await enrichAssigneeNames(rows);
+    const rows = data ?? [];
+    const { notices, error: noticeError } = await getBidNoticesByIds(
+      rows.map((row) => row.notice_id as string),
+    );
+    if (noticeError) {
+      return { assignments: {}, error: normalizeAssignmentsError(noticeError) };
+    }
+
+    const filteredRows = rows.filter((row) => {
+      const notice = notices.get(row.notice_id as string);
+      return notice != null && noticeMatchesAssignmentFilters(notice, filters);
+    });
+
+    const enriched = await enrichAssigneeNames(
+      filteredRows.map((row) => mapAssignmentRow(row)),
+    );
     const assignments: Record<string, BidNoticeAssignment> = {};
     for (const assignment of enriched) {
       assignments[assignment.noticeId] = assignment;
@@ -196,22 +219,15 @@ export async function saveNoticeAssignment(
   }
 
   try {
-    const supabase = createServerClient();
-
-    const { data: notice, error: noticeError } = await supabase
-      .from("khnp_bid_notice")
-      .select("id")
-      .eq("id", noticeId)
-      .eq("is_deleted", false)
-      .maybeSingle();
-
+    const { notice, error: noticeError } = await getBidNoticeById(noticeId);
     if (noticeError) {
-      return { assignment: null, error: normalizeAssignmentsError(noticeError.message) };
+      return { assignment: null, error: normalizeAssignmentsError(noticeError) };
     }
     if (!notice) {
       return { assignment: null, error: "공고를 찾을 수 없습니다." };
     }
 
+    const supabase = createServerClient();
     const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("bid_notice_assignments")
@@ -229,6 +245,13 @@ export async function saveNoticeAssignment(
       .single();
 
     if (error) {
+      if (error.code === "23503") {
+        return {
+          assignment: null,
+          error:
+            "담당 지정 저장에 실패했습니다. Supabase에서 019_srm_bid_notice.sql(FK 제거) 적용 후 schema cache를 새로고침해 주세요.",
+        };
+      }
       return { assignment: null, error: normalizeAssignmentsError(error.message) };
     }
 

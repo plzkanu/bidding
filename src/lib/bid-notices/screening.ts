@@ -1,5 +1,10 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import {
+  getNoticeTableName,
+  resolveBidNoticeDatasetForSiteId,
+} from "./dataset";
+import { getBidNoticeById } from "./notices";
 import type { BidNoticeType } from "./types";
 
 export type BidNoticeScreeningStatus = "WAITING" | "EXCLUDED" | "TARGET";
@@ -73,30 +78,64 @@ export async function getScreeningStatusMap(
 
   try {
     const supabase = createServerClient();
-    let query = supabase
+    const { data, error } = await supabase
       .from("user_bid_notice_screening")
-      .select("notice_id, status, khnp_bid_notice!inner(site_id, notice_type, is_deleted)")
-      .eq("user_id", userId)
-      .eq("khnp_bid_notice.is_deleted", false);
-
-    if (filters?.siteId != null) {
-      query = query.eq("khnp_bid_notice.site_id", filters.siteId);
-    }
-    if (filters?.noticeType) {
-      query = query.eq("khnp_bid_notice.notice_type", filters.noticeType);
-    }
-
-    const { data, error } = await query;
+      .select("notice_id, status")
+      .eq("user_id", userId);
 
     if (error) {
       return { statuses: {}, error: normalizeScreeningError(error.message) };
     }
 
-    const statuses: Record<string, BidNoticeScreeningStatus> = {};
+    const rawStatuses: Record<string, BidNoticeScreeningStatus> = {};
     for (const row of data ?? []) {
-      statuses[row.notice_id as string] = parseScreeningStatus(
+      rawStatuses[row.notice_id as string] = parseScreeningStatus(
         row.status as string,
       );
+    }
+
+    if (filters?.siteId == null && !filters?.noticeType) {
+      return { statuses: rawStatuses, error: null };
+    }
+
+    const noticeIds = Object.keys(rawStatuses);
+    if (noticeIds.length === 0) {
+      return { statuses: {}, error: null };
+    }
+
+    const dataset = await resolveBidNoticeDatasetForSiteId(filters.siteId!);
+    const tables =
+      filters?.siteId != null
+        ? [getNoticeTableName(dataset)]
+        : ["khnp_bid_notice", "srm_bid_notice"];
+
+    const matched = new Set<string>();
+    for (const table of tables) {
+      let query = supabase
+        .from(table)
+        .select("id")
+        .in("id", noticeIds)
+        .eq("is_deleted", false);
+      if (filters?.siteId != null) {
+        query = query.eq("site_id", filters.siteId);
+      }
+      if (filters?.noticeType) {
+        query = query.eq("notice_type", filters.noticeType);
+      }
+      const { data: noticeRows, error: noticeError } = await query;
+      if (noticeError) {
+        return { statuses: {}, error: normalizeScreeningError(noticeError.message) };
+      }
+      for (const row of noticeRows ?? []) {
+        matched.add(row.id as string);
+      }
+    }
+
+    const statuses: Record<string, BidNoticeScreeningStatus> = {};
+    for (const [noticeId, status] of Object.entries(rawStatuses)) {
+      if (matched.has(noticeId)) {
+        statuses[noticeId] = status;
+      }
     }
 
     return { statuses, error: null };
@@ -152,15 +191,10 @@ export async function cycleNoticeScreeningStatus(
   try {
     const supabase = createServerClient();
 
-    const { data: notice, error: noticeError } = await supabase
-      .from("khnp_bid_notice")
-      .select("id")
-      .eq("id", noticeId)
-      .eq("is_deleted", false)
-      .maybeSingle();
+    const { notice, error: noticeError } = await getBidNoticeById(noticeId);
 
     if (noticeError) {
-      return { status: "WAITING", error: normalizeScreeningError(noticeError.message) };
+      return { status: "WAITING", error: normalizeScreeningError(noticeError) };
     }
     if (!notice) {
       return { status: "WAITING", error: "공고를 찾을 수 없습니다." };

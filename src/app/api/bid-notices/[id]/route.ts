@@ -6,7 +6,7 @@ import { isNoticeSubmitted } from "@/lib/bid-notices/submissions";
 import { isNoticeEstimated } from "@/lib/bid-notices/estimates";
 import { isNoticeOrderReported } from "@/lib/bid-notices/order-reports";
 import { getNoticeAssignment } from "@/lib/bid-notices/assignments";
-import { getKhnpBidNoticeById } from "@/lib/bid-notices/khnp";
+import { getBidNoticeById } from "@/lib/bid-notices/notices";
 import {
   deleteManualBidNotice,
   getManualNoticePermissions,
@@ -47,7 +47,7 @@ export async function GET(
     return NextResponse.json({ error: "공고 ID가 필요합니다." }, { status: 400 });
   }
 
-  const { notice, error } = await getKhnpBidNoticeById(id.trim());
+  const { notice, error } = await getBidNoticeById(id.trim());
 
   if (error) {
     return NextResponse.json({ error }, { status: 500 });

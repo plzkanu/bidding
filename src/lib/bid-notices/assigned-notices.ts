@@ -6,23 +6,8 @@ import {
   normalizeAssignmentsError,
   type BidNoticeAssignment,
 } from "@/lib/bid-notices/assignments";
+import { getBidNoticesByIds } from "@/lib/bid-notices/notice-repository";
 import type { KhnpBidNoticeRow } from "@/lib/bid-notices/types";
-
-const NOTICE_SELECT = `
-  *,
-  khnp_bid_open (*),
-  khnp_bid_private (*),
-  khnp_bid_plan_spec (*)
-`;
-
-const ASSIGNMENT_LIST_SELECT = `
-  notice_id,
-  department_id,
-  assignee_user_id,
-  updated_at,
-  departments (id, name),
-  khnp_bid_notice!inner (${NOTICE_SELECT})
-`;
 
 export interface DepartmentAssignmentCount {
   departmentId: string;
@@ -51,6 +36,14 @@ export interface AssignedBidNoticeListResult {
   error: string | null;
 }
 
+interface AssignmentRow {
+  notice_id: string;
+  department_id: string;
+  assignee_user_id: string | null;
+  updated_at: string | null;
+  departments: { id?: string; name?: string } | null;
+}
+
 function supabaseNotReadyError(): string | null {
   if (!isSupabaseConfigured()) {
     return "Supabase가 설정되지 않아 담당공고를 조회할 수 없습니다.";
@@ -62,24 +55,19 @@ function sanitizeSearchTerm(search?: string): string {
   return search?.trim().replace(/[,()]/g, " ").trim() ?? "";
 }
 
-function mapAssignmentListRow(
-  row: Record<string, unknown>,
+function mapAssignmentRow(
+  row: AssignmentRow,
   assigneeName: string | null,
-): AssignedBidNoticeItem | null {
-  const noticeRaw = row.khnp_bid_notice as KhnpBidNoticeRow | KhnpBidNoticeRow[] | null;
-  const notice = Array.isArray(noticeRaw) ? noticeRaw[0] : noticeRaw;
-  if (!notice) return null;
-
-  const department = row.departments as { id?: string; name?: string } | null;
-
+  notice: KhnpBidNoticeRow,
+): AssignedBidNoticeItem {
   return {
     assignment: {
-      noticeId: row.notice_id as string,
-      departmentId: row.department_id as string,
-      departmentName: department?.name ?? "",
-      assigneeUserId: (row.assignee_user_id as string | null) ?? null,
+      noticeId: row.notice_id,
+      departmentId: row.department_id,
+      departmentName: row.departments?.name ?? "",
+      assigneeUserId: row.assignee_user_id,
       assigneeName,
-      updatedAt: (row.updated_at as string | null) ?? null,
+      updatedAt: row.updated_at,
     },
     notice,
   };
@@ -103,6 +91,77 @@ async function getAssigneeNameMap(
   return map;
 }
 
+async function fetchAllAssignmentRows(): Promise<{
+  rows: AssignmentRow[];
+  error: string | null;
+}> {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("bid_notice_assignments")
+    .select(
+      "notice_id, department_id, assignee_user_id, updated_at, departments (id, name)",
+    );
+
+  if (error) {
+    return { rows: [], error: normalizeAssignmentsError(error.message) };
+  }
+
+  return { rows: (data ?? []) as AssignmentRow[], error: null };
+}
+
+async function getActiveAssignedNoticeIds(): Promise<{
+  noticeIds: Set<string>;
+  notices: Map<string, KhnpBidNoticeRow>;
+  error: string | null;
+}> {
+  const { rows, error } = await fetchAllAssignmentRows();
+  if (error) {
+    return { noticeIds: new Set(), notices: new Map(), error };
+  }
+
+  const { notices, error: noticeError } = await getBidNoticesByIds(
+    rows.map((row) => row.notice_id),
+  );
+  if (noticeError) {
+    return { noticeIds: new Set(), notices: new Map(), error: noticeError };
+  }
+
+  const noticeIds = new Set<string>();
+  for (const row of rows) {
+    const notice = notices.get(row.notice_id);
+    if (notice && !notice.is_deleted) {
+      noticeIds.add(row.notice_id);
+    }
+  }
+
+  return { noticeIds, notices, error: null };
+}
+
+async function searchNoticeIdsByTitle(
+  pattern: string,
+): Promise<{ noticeIds: string[]; error: string | null }> {
+  const supabase = createServerClient();
+  const noticeIds = new Set<string>();
+
+  for (const table of ["khnp_bid_notice", "srm_bid_notice"] as const) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("id")
+      .eq("is_deleted", false)
+      .ilike("title", pattern);
+
+    if (error) {
+      return { noticeIds: [], error: normalizeAssignmentsError(error.message) };
+    }
+
+    for (const row of data ?? []) {
+      noticeIds.add(row.id as string);
+    }
+  }
+
+  return { noticeIds: [...noticeIds], error: null };
+}
+
 async function getSearchMatchingNoticeIds(
   search: string,
 ): Promise<{ noticeIds: string[] | null; error: string | null }> {
@@ -112,25 +171,28 @@ async function getSearchMatchingNoticeIds(
   }
 
   try {
-    const supabase = createServerClient();
     const pattern = `%${trimmed}%`;
     const noticeIds = new Set<string>();
+    const { noticeIds: activeAssignedIds, error: activeError } =
+      await getActiveAssignedNoticeIds();
+    if (activeError) {
+      return { noticeIds: [], error: activeError };
+    }
 
     const [titleResult, departmentResult, users] = await Promise.all([
-      supabase
-        .from("khnp_bid_notice")
-        .select("id")
-        .eq("is_deleted", false)
-        .ilike("title", pattern),
-      supabase
-        .from("bid_notice_assignments")
-        .select("notice_id, departments!inner(name)")
-        .ilike("departments.name", pattern),
+      searchNoticeIdsByTitle(pattern),
+      (async () => {
+        const supabase = createServerClient();
+        return supabase
+          .from("bid_notice_assignments")
+          .select("notice_id, departments!inner(name)")
+          .ilike("departments.name", pattern);
+      })(),
       getAllUsers(),
     ]);
 
     if (titleResult.error) {
-      return { noticeIds: [], error: normalizeAssignmentsError(titleResult.error.message) };
+      return { noticeIds: [], error: titleResult.error };
     }
     if (departmentResult.error) {
       return {
@@ -139,29 +201,17 @@ async function getSearchMatchingNoticeIds(
       };
     }
 
-    if ((titleResult.data ?? []).length > 0) {
-      const titleNoticeIds = (titleResult.data ?? []).map((row) => row.id as string);
-      const { data: assignedTitleMatches, error: assignedTitleError } =
-        await supabase
-          .from("bid_notice_assignments")
-          .select("notice_id, khnp_bid_notice!inner(is_deleted)")
-          .eq("khnp_bid_notice.is_deleted", false)
-          .in("notice_id", titleNoticeIds);
-
-      if (assignedTitleError) {
-        return {
-          noticeIds: [],
-          error: normalizeAssignmentsError(assignedTitleError.message),
-        };
-      }
-
-      for (const row of assignedTitleMatches ?? []) {
-        noticeIds.add(row.notice_id as string);
+    for (const id of titleResult.noticeIds) {
+      if (activeAssignedIds.has(id)) {
+        noticeIds.add(id);
       }
     }
 
     for (const row of departmentResult.data ?? []) {
-      noticeIds.add(row.notice_id as string);
+      const noticeId = row.notice_id as string;
+      if (activeAssignedIds.has(noticeId)) {
+        noticeIds.add(noticeId);
+      }
     }
 
     const lowered = trimmed.toLowerCase();
@@ -170,18 +220,19 @@ async function getSearchMatchingNoticeIds(
       .map((user) => user.id);
 
     if (matchingUserIds.length > 0) {
-      const { data, error } = await supabase
-        .from("bid_notice_assignments")
-        .select("notice_id, khnp_bid_notice!inner(is_deleted)")
-        .eq("khnp_bid_notice.is_deleted", false)
-        .in("assignee_user_id", matchingUserIds);
-
+      const { rows, error } = await fetchAllAssignmentRows();
       if (error) {
-        return { noticeIds: [], error: normalizeAssignmentsError(error.message) };
+        return { noticeIds: [], error };
       }
 
-      for (const row of data ?? []) {
-        noticeIds.add(row.notice_id as string);
+      for (const row of rows) {
+        if (
+          row.assignee_user_id &&
+          matchingUserIds.includes(row.assignee_user_id) &&
+          activeAssignedIds.has(row.notice_id)
+        ) {
+          noticeIds.add(row.notice_id);
+        }
       }
     }
 
@@ -204,30 +255,31 @@ export async function getDepartmentAssignmentCounts(): Promise<{
   }
 
   try {
-    const supabase = createServerClient();
-    const [{ data, error }, { departments, error: departmentsError }] =
-      await Promise.all([
-        supabase
-          .from("bid_notice_assignments")
-          .select(
-            "department_id, departments (id, name, is_active), khnp_bid_notice!inner(is_deleted)",
-          )
-          .eq("khnp_bid_notice.is_deleted", false),
-        listDepartments({ activeOnly: false }),
-      ]);
+    const [{ rows, error }, { departments, error: departmentsError }] =
+      await Promise.all([fetchAllAssignmentRows(), listDepartments({ activeOnly: false })]);
 
     if (error) {
-      return { counts: [], total: 0, error: normalizeAssignmentsError(error.message) };
+      return { counts: [], total: 0, error };
     }
     if (departmentsError) {
       return { counts: [], total: 0, error: departmentsError };
     }
 
+    const { notices, error: noticeError } = await getBidNoticesByIds(
+      rows.map((row) => row.notice_id),
+    );
+    if (noticeError) {
+      return { counts: [], total: 0, error: normalizeAssignmentsError(noticeError) };
+    }
+
     const countByDepartmentId = new Map<string, number>();
     let total = 0;
 
-    for (const row of data ?? []) {
-      const departmentId = row.department_id as string;
+    for (const row of rows) {
+      const notice = notices.get(row.notice_id);
+      if (!notice || notice.is_deleted) continue;
+
+      const departmentId = row.department_id;
       countByDepartmentId.set(
         departmentId,
         (countByDepartmentId.get(departmentId) ?? 0) + 1,
@@ -271,8 +323,6 @@ export async function listAssignedBidNotices(
 
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
 
   const { counts, total: totalAssigned, error: countsError } =
     await getDepartmentAssignmentCounts();
@@ -308,53 +358,74 @@ export async function listAssignedBidNotices(
   }
 
   try {
-    const supabase = createServerClient();
-    let query = supabase
-      .from("bid_notice_assignments")
-      .select(ASSIGNMENT_LIST_SELECT, { count: "exact" })
-      .eq("khnp_bid_notice.is_deleted", false)
-      .order("updated_at", { ascending: false });
-
-    const departmentId = options.departmentId?.trim();
-    if (departmentId) {
-      query = query.eq("department_id", departmentId);
-    }
-    if (searchNoticeIds) {
-      query = query.in("notice_id", searchNoticeIds);
-    }
-
-    const { data, error, count } = await query.range(from, to);
-
+    const { rows, error } = await fetchAllAssignmentRows();
     if (error) {
       return {
         items: [],
         total: 0,
         departmentCounts: counts,
         totalAssigned,
-        error: normalizeAssignmentsError(error.message),
+        error,
       };
     }
 
-    const assigneeIds = (data ?? [])
-      .map((row) => row.assignee_user_id as string | null)
+    const { notices, error: noticeError } = await getBidNoticesByIds(
+      rows.map((row) => row.notice_id),
+    );
+    if (noticeError) {
+      return {
+        items: [],
+        total: 0,
+        departmentCounts: counts,
+        totalAssigned,
+        error: normalizeAssignmentsError(noticeError),
+      };
+    }
+
+    const departmentId = options.departmentId?.trim();
+    const filteredRows = rows.filter((row) => {
+      const notice = notices.get(row.notice_id);
+      if (!notice || notice.is_deleted) return false;
+      if (departmentId && row.department_id !== departmentId) return false;
+      if (searchNoticeIds && !searchNoticeIds.includes(row.notice_id)) {
+        return false;
+      }
+      return true;
+    });
+
+    filteredRows.sort((a, b) => {
+      const aTime = a.updated_at ? Date.parse(a.updated_at) : 0;
+      const bTime = b.updated_at ? Date.parse(b.updated_at) : 0;
+      return bTime - aTime;
+    });
+
+    const total = filteredRows.length;
+    const from = (page - 1) * pageSize;
+    const pageRows = filteredRows.slice(from, from + pageSize);
+
+    const assigneeIds = pageRows
+      .map((row) => row.assignee_user_id)
       .filter((id): id is string => Boolean(id));
     const assigneeNameMap = await getAssigneeNameMap(assigneeIds);
 
-    const items = (data ?? [])
-      .map((row) =>
-        mapAssignmentListRow(
+    const items = pageRows
+      .map((row) => {
+        const notice = notices.get(row.notice_id);
+        if (!notice) return null;
+
+        return mapAssignmentRow(
           row,
           row.assignee_user_id
-            ? (assigneeNameMap.get(row.assignee_user_id as string) ??
-                (row.assignee_user_id as string))
+            ? (assigneeNameMap.get(row.assignee_user_id) ?? row.assignee_user_id)
             : null,
-        ),
-      )
+          notice,
+        );
+      })
       .filter((item): item is AssignedBidNoticeItem => item != null);
 
     return {
       items,
-      total: count ?? items.length,
+      total,
       departmentCounts: counts,
       totalAssigned,
       error: null,

@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import type { CrawlSite } from "@/lib/crawl-sites";
+import { sortCrawlSitesForDisplay } from "@/lib/crawl-sites";
 
 interface CrawlSiteSelectorProps {
   sites: CrawlSite[];
@@ -21,6 +23,10 @@ export function CrawlSiteSelector({
   variant = "default",
 }: CrawlSiteSelectorProps) {
   const isDisabled = disabled || isLoading;
+  const orderedSites = useMemo(
+    () => sortCrawlSitesForDisplay(sites),
+    [sites],
+  );
 
   if (variant === "compact") {
     return (
@@ -38,10 +44,10 @@ export function CrawlSiteSelector({
               />
             ))}
           </>
-        ) : sites.length === 0 ? (
+        ) : orderedSites.length === 0 ? (
           <span className="text-xs text-slate-400">등록된 사이트 없음</span>
         ) : (
-          sites.map((site) => {
+          orderedSites.map((site) => {
             const isSelected = selectedSiteId === site.id;
             return (
               <button
@@ -87,26 +93,26 @@ export function CrawlSiteSelector({
       <p className="mb-3 text-sm font-medium text-slate-700">입찰공고 사이트</p>
 
       {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className="h-[5.5rem] animate-pulse rounded-xl border border-slate-200 bg-slate-100"
+              className="h-[4.75rem] animate-pulse rounded-xl border border-slate-200 bg-slate-100"
             />
           ))}
         </div>
-      ) : sites.length === 0 ? (
+      ) : orderedSites.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
           활성화된 입찰공고 사이트가 없습니다. 관리자 메뉴에서 사이트를
           등록하세요.
         </p>
       ) : (
         <div
-          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4"
           role="listbox"
           aria-label="입찰공고 사이트 선택"
         >
-          {sites.map((site) => {
+          {orderedSites.map((site) => {
             const isSelected = selectedSiteId === site.id;
             const meta = [site.org_type, site.region]
               .filter(Boolean)
@@ -120,22 +126,23 @@ export function CrawlSiteSelector({
                 aria-selected={isSelected}
                 disabled={isDisabled}
                 onClick={() => onSelect(site.id)}
-                className={`flex min-h-[5.5rem] flex-col rounded-xl border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                title={site.site_name}
+                className={`flex min-h-[4.75rem] flex-col rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   isSelected
                     ? "border-[#004b87] bg-[#004b87]/5 shadow-sm ring-2 ring-[#009ada]/30"
                     : "border-slate-200 bg-white hover:border-[#009ada]/50 hover:bg-slate-50"
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-start justify-between gap-1.5">
                   <span
-                    className={`text-sm font-semibold leading-snug ${
+                    className={`truncate text-xs font-semibold leading-snug ${
                       isSelected ? "text-[#004b87]" : "text-slate-800"
                     }`}
                   >
                     {site.site_name}
                   </span>
                   <span
-                    className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${
+                    className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
                       isSelected
                         ? "bg-[#004b87] text-white"
                         : "bg-slate-100 text-slate-600"
@@ -145,9 +152,11 @@ export function CrawlSiteSelector({
                   </span>
                 </div>
                 {meta ? (
-                  <span className="mt-2 text-xs text-slate-500">{meta}</span>
+                  <span className="mt-1.5 truncate text-[11px] text-slate-500">
+                    {meta}
+                  </span>
                 ) : (
-                  <span className="mt-2 text-xs text-slate-400">
+                  <span className="mt-1.5 truncate text-[11px] text-slate-400">
                     {site.site_category ?? "입찰공고"}
                   </span>
                 )}

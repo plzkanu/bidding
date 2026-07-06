@@ -32,6 +32,50 @@ interface FetchResult {
   error: string | null;
 }
 
+/** 대시보드·입찰공고 조회 상단 발주사 버튼 표시 순서 */
+function getCrawlSiteDisplayRank(site: CrawlSite): number {
+  const key = `${site.site_code} ${site.site_name}`;
+
+  if (/KHNP|KPOS|한수원/i.test(key)) return 0;
+  if (/K-?PRO/i.test(key)) return 10;
+  if (/한국전력|KEPCO/i.test(key)) return 11;
+
+  return 100;
+}
+
+export function sortCrawlSitesForDisplay(sites: CrawlSite[]): CrawlSite[] {
+  return [...sites].sort((a, b) => {
+    const rankDiff = getCrawlSiteDisplayRank(a) - getCrawlSiteDisplayRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return a.site_name.localeCompare(b.site_name, "ko");
+  });
+}
+
+export async function getCrawlSiteById(
+  id: number,
+): Promise<CrawlSite | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("crawl_sites")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data as CrawlSite;
+  } catch {
+    return null;
+  }
+}
+
 export async function getCrawlSites(options?: {
   activeOnly?: boolean;
 }): Promise<FetchResult> {
@@ -56,7 +100,7 @@ export async function getCrawlSites(options?: {
       return { sites: [], error: formatSupabaseNetworkError(error.message) };
     }
 
-    return { sites: (data ?? []) as CrawlSite[], error: null };
+    return { sites: sortCrawlSitesForDisplay((data ?? []) as CrawlSite[]), error: null };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "입찰공고 사이트 조회에 실패했습니다.";

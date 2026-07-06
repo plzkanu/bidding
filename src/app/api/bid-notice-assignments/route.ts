@@ -10,7 +10,12 @@ import {
   isSupabaseConfigured,
 } from "@/lib/supabase/config";
 
-const VALID_NOTICE_TYPES: BidNoticeType[] = ["BID", "PRIVATE", "PLAN_SPEC"];
+const VALID_NOTICE_TYPES: BidNoticeType[] = [
+  "BID",
+  "PRIVATE",
+  "PLAN_SPEC",
+  "SPEC_REVIEW",
+];
 
 function supabaseNotConfiguredResponse() {
   return NextResponse.json(
