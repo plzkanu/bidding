@@ -1,6 +1,7 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { listDepartments } from "@/lib/departments";
+import { getAllNoticeTableNames } from "@/lib/bid-notices/dataset";
 import { getAllUsers } from "@/lib/users-store";
 import {
   normalizeAssignmentsError,
@@ -143,7 +144,7 @@ async function searchNoticeIdsByTitle(
   const supabase = createServerClient();
   const noticeIds = new Set<string>();
 
-  for (const table of ["khnp_bid_notice", "srm_bid_notice"] as const) {
+  for (const table of getAllNoticeTableNames()) {
     const { data, error } = await supabase
       .from(table)
       .select("id")

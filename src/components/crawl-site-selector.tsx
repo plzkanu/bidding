@@ -31,16 +31,16 @@ export function CrawlSiteSelector({
   if (variant === "compact") {
     return (
       <div
-        className="flex max-w-[42rem] flex-wrap items-center justify-end gap-2"
+        className="flex min-w-0 flex-nowrap items-center justify-end gap-1.5 overflow-x-auto"
         role="listbox"
         aria-label="입찰공고 사이트 선택"
       >
         {isLoading ? (
           <>
-            {[1, 2, 3].map((i) => (
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
               <div
                 key={i}
-                className="h-9 w-28 animate-pulse rounded-lg border border-slate-200 bg-slate-100"
+                className="h-9 w-24 shrink-0 animate-pulse rounded-lg border border-slate-200 bg-slate-100"
               />
             ))}
           </>
@@ -58,14 +58,14 @@ export function CrawlSiteSelector({
                 disabled={isDisabled}
                 onClick={() => onSelect(site.id)}
                 title={site.site_name}
-                className={`inline-flex max-w-[13rem] items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   isSelected
                     ? "border-[#004b87] bg-[#004b87]/5 ring-1 ring-[#009ada]/30"
                     : "border-slate-200 bg-white hover:border-[#009ada]/50 hover:bg-slate-50"
                 }`}
               >
                 <span
-                  className={`truncate text-xs font-semibold ${
+                  className={`max-w-[7.5rem] truncate text-xs font-semibold xl:max-w-[9.5rem] ${
                     isSelected ? "text-[#004b87]" : "text-slate-800"
                   }`}
                 >
@@ -93,11 +93,11 @@ export function CrawlSiteSelector({
       <p className="mb-3 text-sm font-medium text-slate-700">입찰공고 사이트</p>
 
       {isLoading ? (
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
+        <div className="flex flex-nowrap gap-2.5 overflow-x-auto">
+          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
             <div
               key={i}
-              className="h-[4.75rem] animate-pulse rounded-xl border border-slate-200 bg-slate-100"
+              className="h-[4.75rem] min-w-[8.5rem] flex-1 animate-pulse rounded-xl border border-slate-200 bg-slate-100"
             />
           ))}
         </div>
@@ -108,7 +108,7 @@ export function CrawlSiteSelector({
         </p>
       ) : (
         <div
-          className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4"
+          className="flex flex-nowrap gap-2.5 overflow-x-auto"
           role="listbox"
           aria-label="입찰공고 사이트 선택"
         >
@@ -127,7 +127,7 @@ export function CrawlSiteSelector({
                 disabled={isDisabled}
                 onClick={() => onSelect(site.id)}
                 title={site.site_name}
-                className={`flex min-h-[4.75rem] flex-col rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`flex min-h-[4.75rem] min-w-[8.5rem] flex-1 flex-col rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   isSelected
                     ? "border-[#004b87] bg-[#004b87]/5 shadow-sm ring-2 ring-[#009ada]/30"
                     : "border-slate-200 bg-white hover:border-[#009ada]/50 hover:bg-slate-50"

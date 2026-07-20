@@ -1,5 +1,9 @@
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
+  excludesExpiredNoticesInDefaultList,
+  resolveBidNoticeDatasetForSiteId,
+} from "./dataset";
+import {
   getNoticeDeadline,
   isApproachingDeadline,
   isDeadlineExpired,
@@ -133,13 +137,18 @@ export async function getNoticeIdsByDeadlineStatus(options: {
     notices = siteNotices;
   }
 
+  const dataset = await resolveBidNoticeDatasetForSiteId(options.siteId);
   const now = new Date();
   const ids = notices
-    .filter((row) =>
-      options.status === "expired"
-        ? isDeadlineExpired(row, now)
-        : !isDeadlineExpired(row, now),
-    )
+    .filter((row) => {
+      if (options.status === "expired") {
+        return isDeadlineExpired(row, now);
+      }
+      if (!excludesExpiredNoticesInDefaultList(dataset)) {
+        return true;
+      }
+      return !isDeadlineExpired(row, now);
+    })
     .sort((a, b) => {
       const dateA = a.notice_date ? new Date(a.notice_date).getTime() : 0;
       const dateB = b.notice_date ? new Date(b.notice_date).getTime() : 0;

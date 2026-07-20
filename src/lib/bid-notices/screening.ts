@@ -1,11 +1,15 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
+  getAllNoticeTableNames,
   getNoticeTableName,
+  getNoticeTypeDbValues,
   resolveBidNoticeDatasetForSiteId,
+  resolveDatasetFromNoticeTableName,
 } from "./dataset";
 import { getBidNoticeById } from "./notices";
 import type { BidNoticeType } from "./types";
+import { chunkIds } from "./utils";
 
 export type BidNoticeScreeningStatus = "WAITING" | "EXCLUDED" | "TARGET";
 
@@ -107,27 +111,40 @@ export async function getScreeningStatusMap(
     const tables =
       filters?.siteId != null
         ? [getNoticeTableName(dataset)]
-        : ["khnp_bid_notice", "srm_bid_notice"];
+        : getAllNoticeTableNames();
 
     const matched = new Set<string>();
     for (const table of tables) {
-      let query = supabase
-        .from(table)
-        .select("id")
-        .in("id", noticeIds)
-        .eq("is_deleted", false);
-      if (filters?.siteId != null) {
-        query = query.eq("site_id", filters.siteId);
-      }
-      if (filters?.noticeType) {
-        query = query.eq("notice_type", filters.noticeType);
-      }
-      const { data: noticeRows, error: noticeError } = await query;
-      if (noticeError) {
-        return { statuses: {}, error: normalizeScreeningError(noticeError.message) };
-      }
-      for (const row of noticeRows ?? []) {
-        matched.add(row.id as string);
+      for (const idChunk of chunkIds(noticeIds)) {
+        let query = supabase
+          .from(table)
+          .select("id")
+          .in("id", idChunk)
+          .eq("is_deleted", false);
+        if (filters?.siteId != null) {
+          query = query.eq("site_id", filters.siteId);
+        }
+        if (filters?.noticeType) {
+          const tableDataset = resolveDatasetFromNoticeTableName(table);
+          const noticeTypeValues = getNoticeTypeDbValues(
+            tableDataset,
+            filters.noticeType,
+          );
+          query =
+            noticeTypeValues.length === 1
+              ? query.eq("notice_type", noticeTypeValues[0]!)
+              : query.in("notice_type", noticeTypeValues);
+        }
+        const { data: noticeRows, error: noticeError } = await query;
+        if (noticeError) {
+          return {
+            statuses: {},
+            error: normalizeScreeningError(noticeError.message),
+          };
+        }
+        for (const row of noticeRows ?? []) {
+          matched.add(row.id as string);
+        }
       }
     }
 

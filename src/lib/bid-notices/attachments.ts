@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { getBidNoticeById } from "./notice-repository";
 
 export const ATTACHMENTS_BUCKET = "bid-notice-attachments";
 export const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
@@ -169,18 +170,11 @@ function mapAttachmentRow(row: {
 }
 
 async function assertNoticeExists(noticeId: string): Promise<string | null> {
-  const supabase = createServerClient();
-  const { data, error } = await supabase
-    .from("khnp_bid_notice")
-    .select("id")
-    .eq("id", noticeId)
-    .eq("is_deleted", false)
-    .maybeSingle();
-
+  const { notice, error } = await getBidNoticeById(noticeId);
   if (error) {
-    return normalizeAttachmentsError(error.message);
+    return normalizeAttachmentsError(error);
   }
-  if (!data) {
+  if (!notice) {
     return "공고를 찾을 수 없습니다.";
   }
   return null;

@@ -39,6 +39,11 @@ function getCrawlSiteDisplayRank(site: CrawlSite): number {
   if (/KHNP|KPOS|한수원/i.test(key)) return 0;
   if (/K-?PRO/i.test(key)) return 10;
   if (/한국전력|KEPCO/i.test(key)) return 11;
+  if (/G2B|나라장터|조달/i.test(key)) return 12;
+  if (/KOGAS|한국가스|가스공사/i.test(key)) return 13;
+  if (/\bLH\b|한국토지주택|토지주택/i.test(key)) return 14;
+  if (/\bEX\b|한국도로|도로공사/i.test(key)) return 15;
+  if (/\bKR\b|국가철도|철도공단/i.test(key)) return 16;
 
   return 100;
 }

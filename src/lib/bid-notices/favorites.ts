@@ -1,11 +1,15 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
+  getAllNoticeTableNames,
   getNoticeTableName,
+  getNoticeTypeDbValues,
   resolveBidNoticeDatasetForSiteId,
+  resolveDatasetFromNoticeTableName,
 } from "./dataset";
 import type { BidNoticeType } from "./types";
 import { getBidNoticeById } from "./notices";
+import { chunkIds } from "./utils";
 
 export const FAVORITES_TABLE_SETUP_MESSAGE =
   "관심공고를 저장할 수 없습니다. Supabase에 user_bid_favorites 테이블이 필요합니다. 관리자에게 문의하거나 supabase/migrations/002_user_bid_favorites.sql을 적용해 주세요.";
@@ -53,30 +57,41 @@ async function filterFavoriteNoticeIds(
   const tables =
     filters?.siteId != null
       ? [getNoticeTableName(dataset)]
-      : ["khnp_bid_notice", "srm_bid_notice"];
+      : getAllNoticeTableNames();
 
   const matched = new Set<string>();
+  const supabase = createServerClient();
 
   for (const table of tables) {
-    let query = createServerClient()
-      .from(table)
-      .select("id")
-      .in("id", noticeIds)
-      .eq("is_deleted", false);
+    for (const idChunk of chunkIds(noticeIds)) {
+      let query = supabase
+        .from(table)
+        .select("id")
+        .in("id", idChunk)
+        .eq("is_deleted", false);
 
-    if (filters?.siteId != null) {
-      query = query.eq("site_id", filters.siteId);
-    }
-    if (filters?.noticeType) {
-      query = query.eq("notice_type", filters.noticeType);
-    }
+      if (filters?.siteId != null) {
+        query = query.eq("site_id", filters.siteId);
+      }
+      if (filters?.noticeType) {
+        const tableDataset = resolveDatasetFromNoticeTableName(table);
+        const noticeTypeValues = getNoticeTypeDbValues(
+          tableDataset,
+          filters.noticeType,
+        );
+        query =
+          noticeTypeValues.length === 1
+            ? query.eq("notice_type", noticeTypeValues[0]!)
+            : query.in("notice_type", noticeTypeValues);
+      }
 
-    const { data, error } = await query;
-    if (error) {
-      return { noticeIds: [], error: normalizeFavoritesError(error.message) };
-    }
-    for (const row of data ?? []) {
-      matched.add(row.id as string);
+      const { data, error } = await query;
+      if (error) {
+        return { noticeIds: [], error: normalizeFavoritesError(error.message) };
+      }
+      for (const row of data ?? []) {
+        matched.add(row.id as string);
+      }
     }
   }
 

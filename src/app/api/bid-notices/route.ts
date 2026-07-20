@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
 import {
+  getNoticeTypeValidationMessage,
   isNoticeTypeValidForDataset,
   resolveBidNoticeDatasetForSiteId,
 } from "@/lib/bid-notices/dataset";
@@ -86,10 +87,7 @@ export async function GET(request: Request) {
   if (!isNoticeTypeValidForDataset(dataset, noticeType)) {
     return NextResponse.json(
       {
-        error:
-          dataset === "srm"
-            ? "noticeType은 BID, SPEC_REVIEW 중 하나여야 합니다."
-            : "noticeType은 BID, PRIVATE, PLAN_SPEC 중 하나여야 합니다.",
+        error: getNoticeTypeValidationMessage(dataset),
       },
       { status: 400 },
     );

@@ -19,6 +19,7 @@ import {
   ALL_BID_NOTICE_TYPES,
   getNoticeTypesForDataset,
   resolveBidNoticeDatasetFromSite,
+  supportsManualBidNoticeEntry,
   type BidNoticeDataset,
 } from "@/lib/bid-notices/dataset";
 import {
@@ -1019,7 +1020,7 @@ export function BidNoticeInquiry({
           <button
             type="button"
             onClick={() => setManualFormMode("create")}
-            disabled={siteId == null}
+            disabled={siteId == null || !supportsManualBidNoticeEntry(siteDataset)}
             className="shrink-0 rounded-lg bg-[#a4ce39] px-4 py-2 text-sm font-semibold text-[#004b87] hover:bg-[#95bd33] disabled:opacity-40"
           >
             공고 직접 등록

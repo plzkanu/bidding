@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { getBidNoticeById } from "./notice-repository";
 
 export const MEMO_MAX_LENGTH = 10_000;
 
@@ -96,15 +97,10 @@ export async function saveNoticeMemo(
   try {
     const supabase = createServerClient();
 
-    const { data: notice, error: noticeError } = await supabase
-      .from("khnp_bid_notice")
-      .select("id")
-      .eq("id", noticeId)
-      .eq("is_deleted", false)
-      .maybeSingle();
+    const { notice, error: noticeError } = await getBidNoticeById(noticeId);
 
     if (noticeError) {
-      return { data: null, error: normalizeMemosError(noticeError.message) };
+      return { data: null, error: normalizeMemosError(noticeError) };
     }
     if (!notice) {
       return { data: null, error: "공고를 찾을 수 없습니다." };

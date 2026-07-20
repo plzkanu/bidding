@@ -37,15 +37,24 @@ import {
 
 import {
   fetchBidNoticesForSite,
+  normalizeNoticeRow,
 } from "./notice-repository";
 import {
+  getNoticeListOrderColumn,
   getNoticeSelect,
   getNoticeTableName,
   getNoticeTypesForDataset,
+  hasNoticeDateColumn,
   resolveBidNoticeDatasetForSiteId,
+  type BidNoticeDataset,
 } from "./dataset";
-import { normalizeSrmBidNoticeRow } from "./normalize-srm";
-import type { BidNoticeType, KhnpBidNoticeRow, SrmBidNoticeRow } from "./types";
+import type {
+  BidNoticeType,
+  G2bBidNoticeRow,
+  KhnpBidNoticeRow,
+  KogasBidNoticeRow,
+  SrmBidNoticeRow,
+} from "./types";
 
 export {
   getApproachingNoticeIds,
@@ -186,8 +195,20 @@ export interface DashboardData {
 
 function emptyCounts(): ApproachingDeadlineCounts {
   return {
-    week: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0, SPEC_REVIEW: 0 },
-    day: { BID: 0, PRIVATE: 0, PLAN_SPEC: 0, SPEC_REVIEW: 0 },
+    week: {
+      BID: 0,
+      PRIVATE: 0,
+      PLAN_SPEC: 0,
+      SPEC_REVIEW: 0,
+      PRE_SPEC: 0,
+    },
+    day: {
+      BID: 0,
+      PRIVATE: 0,
+      PLAN_SPEC: 0,
+      SPEC_REVIEW: 0,
+      PRE_SPEC: 0,
+    },
   };
 }
 
@@ -214,16 +235,16 @@ function emptyKpis(): DashboardKpis {
 
 
 function mapDashboardNoticeRow(
-  dataset: "khnp" | "srm",
-  row: (KhnpBidNoticeRow | SrmBidNoticeRow) & {
+  dataset: BidNoticeDataset,
+  row: (KhnpBidNoticeRow | SrmBidNoticeRow | G2bBidNoticeRow | KogasBidNoticeRow) & {
     crawl_sites: { site_name: string } | { site_name: string }[] | null;
   },
 ): KhnpBidNoticeRow {
   const { crawl_sites: _crawlSites, ...notice } = row;
-  if (dataset === "srm") {
-    return normalizeSrmBidNoticeRow(notice as SrmBidNoticeRow);
-  }
-  return { ...(notice as KhnpBidNoticeRow), dataset: "khnp" };
+  return normalizeNoticeRow(
+    dataset,
+    notice as KhnpBidNoticeRow | SrmBidNoticeRow | G2bBidNoticeRow | KogasBidNoticeRow,
+  );
 }
 
 function resolveSiteName(
@@ -448,6 +469,8 @@ export async function getDashboardData(options: {
     const noticeTable = getNoticeTableName(dataset);
     const noticeSelect = `${getNoticeSelect(dataset)}, crawl_sites ( site_name )`;
     const siteNoticeTypes = getNoticeTypesForDataset(dataset);
+    const listOrderColumn = getNoticeListOrderColumn(dataset);
+    const dateColumn = hasNoticeDateColumn(dataset) ? "notice_date" : "created_at";
 
     const { start: monthStart, end: monthEnd } = getKstMonthRange(now);
 
@@ -494,9 +517,9 @@ export async function getDashboardData(options: {
 
         .eq("is_deleted", false)
 
-        .gte("notice_date", monthStart)
+        .gte(dateColumn, monthStart)
 
-        .lt("notice_date", monthEnd),
+        .lt(dateColumn, monthEnd),
 
       supabase
 
@@ -508,7 +531,7 @@ export async function getDashboardData(options: {
 
         .eq("is_deleted", false)
 
-        .order("notice_date", { ascending: false, nullsFirst: false })
+        .order(listOrderColumn, { ascending: false, nullsFirst: false })
 
         .limit(40),
 
@@ -522,13 +545,13 @@ export async function getDashboardData(options: {
 
         .eq("is_deleted", false)
 
-        .gte("notice_date", calendarStart)
+        .gte(dateColumn, calendarStart)
 
-        .lt("notice_date", calendarEnd)
+        .lt(dateColumn, calendarEnd)
 
-        .not("notice_date", "is", null)
+        .not(dateColumn, "is", null)
 
-        .order("notice_date", { ascending: false }),
+        .order(listOrderColumn, { ascending: false }),
 
       getScreeningStatusMap(options.userId, { siteId: options.siteId }),
 
@@ -615,7 +638,7 @@ export async function getDashboardData(options: {
 
 
     const allSiteNotices = ((recentRows ?? []) as unknown as Array<
-      (KhnpBidNoticeRow | SrmBidNoticeRow) & {
+      (KhnpBidNoticeRow | SrmBidNoticeRow | G2bBidNoticeRow | KogasBidNoticeRow) & {
         crawl_sites: { site_name: string } | { site_name: string }[] | null;
       }
     >).map((row) => {
@@ -652,7 +675,7 @@ export async function getDashboardData(options: {
 
         .eq("is_deleted", false)
 
-        .order("notice_date", { ascending: false, nullsFirst: false })
+        .order(listOrderColumn, { ascending: false, nullsFirst: false })
 
         .limit(limit);
 

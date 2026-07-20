@@ -10,6 +10,25 @@ export function pickOne<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
+/**
+ * PostgREST `.in()` 필터는 UUID가 많으면 URL/헤더 제한으로 fetch failed가 난다.
+ * (~350개 부근부터 HeadersOverflowError)
+ */
+export const SUPABASE_IN_QUERY_CHUNK_SIZE = 100;
+
+export function chunkIds<T>(
+  items: T[],
+  size: number = SUPABASE_IN_QUERY_CHUNK_SIZE,
+): T[][] {
+  if (items.length === 0) return [];
+  if (items.length <= size) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "-";
   const date = new Date(value);

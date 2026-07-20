@@ -5,13 +5,12 @@ import {
   getFavoriteNoticeIds,
   removeNoticeFavorite,
 } from "@/lib/bid-notices/favorites";
+import { ALL_BID_NOTICE_TYPES } from "@/lib/bid-notices/dataset";
 import type { BidNoticeType } from "@/lib/bid-notices/types";
 import {
   getSupabaseConfigError,
   isSupabaseConfigured,
 } from "@/lib/supabase/config";
-
-const VALID_NOTICE_TYPES: BidNoticeType[] = ["BID", "PRIVATE", "PLAN_SPEC"];
 
 function supabaseNotConfiguredResponse() {
   return NextResponse.json(
@@ -40,7 +39,7 @@ export async function GET(request: Request) {
       filters.siteId = siteId;
     }
   }
-  if (noticeType && VALID_NOTICE_TYPES.includes(noticeType)) {
+  if (noticeType && ALL_BID_NOTICE_TYPES.includes(noticeType)) {
     filters.noticeType = noticeType;
   }
 
