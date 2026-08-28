@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { attachSessionCookie } from "@/lib/auth";
+import { recordUserLogin } from "@/lib/usage-store";
 import { verifyUserCredentials } from "@/lib/users-store";
 
 export async function POST(request: Request) {
@@ -25,6 +26,12 @@ export async function POST(request: Request) {
         { error: "아이디 또는 비밀번호가 올바르지 않습니다." },
         { status: 401 },
       );
+    }
+
+    try {
+      await recordUserLogin(user.id);
+    } catch {
+      // 사용량 기록 실패해도 로그인은 진행
     }
 
     const response = NextResponse.json({

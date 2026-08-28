@@ -60,7 +60,7 @@ import {
 const PAGE_SIZE = 20;
 const EXPORT_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10_000;
-const SITE_STORAGE_KEY = "bid-notice-site-id";
+const SITE_STORAGE_KEY = "bid-notice-inquiry-site-id";
 
 const LIST_TABLE_CLASS = "w-full table-fixed text-left text-xs";
 const BID_STATUS_COL_CLASS = "w-[4.5rem] whitespace-nowrap px-2 py-1.5";
@@ -81,19 +81,6 @@ const BID_CLOSE_COL_CLASS = LIST_DATETIME_COL_CLASS;
 /** 공고기간 */
 const PERIOD_COL_CLASS = LIST_PERIOD_COL_CLASS;
 const PRIVATE_CONTENT_COL_CLASS = "min-w-0 truncate px-2 py-1.5";
-
-function resolveInitialSiteId(
-  sites: CrawlSite[],
-  storedId: string | null,
-): number | null {
-  if (sites.length === 0) return null;
-  const parsed = storedId ? Number(storedId) : NaN;
-  if (!Number.isNaN(parsed) && sites.some((s) => s.id === parsed)) {
-    return parsed;
-  }
-  const khnp = sites.find((s) => s.site_code === "KHNP");
-  return khnp?.id ?? sites[0].id;
-}
 
 interface BidNoticeInquiryProps {
   /** 관심공고 메뉴 등: 처음부터 관심공고만 조회 */
@@ -141,6 +128,7 @@ export function BidNoticeInquiry({
 
   const [sites, setSites] = useState<CrawlSite[]>([]);
   const [siteId, setSiteId] = useState<number | null>(null);
+  const [sitesReady, setSitesReady] = useState(false);
   const [noticeType, setNoticeType] = useState<BidNoticeType>(
     initialNoticeType ?? "BID",
   );
@@ -154,6 +142,8 @@ export function BidNoticeInquiry({
   const [keywordScreeningOnly, setKeywordScreeningOnly] = useState(
     initialKeywordScreeningOnly,
   );
+  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState("");
+  const [purchaseTypes, setPurchaseTypes] = useState<string[]>([]);
   const [activeKeywords, setActiveKeywords] = useState<string[]>([]);
   const [showRegisteredKeywords, setShowRegisteredKeywords] = useState(false);
   const [noticeDateYesterday, setNoticeDateYesterday] = useState(
@@ -222,10 +212,22 @@ export function BidNoticeInquiry({
   const siteDataset: BidNoticeDataset = selectedSite
     ? resolveBidNoticeDatasetFromSite(selectedSite)
     : "khnp";
-  const siteNoticeTypes = useMemo(
-    () => getNoticeTypesForDataset(siteDataset),
-    [siteDataset],
-  );
+  const siteNoticeTypes = useMemo(() => {
+    if (siteId == null) {
+      // 전체: 모든 사이트에서 쓰는 공고유형 합집합
+      const typeSet = new Set<BidNoticeType>();
+      for (const site of sites) {
+        for (const type of getNoticeTypesForDataset(
+          resolveBidNoticeDatasetFromSite(site),
+        )) {
+          typeSet.add(type);
+        }
+      }
+      const ordered = ALL_BID_NOTICE_TYPES.filter((type) => typeSet.has(type));
+      return ordered.length > 0 ? ordered : (["BID"] as BidNoticeType[]);
+    }
+    return getNoticeTypesForDataset(siteDataset);
+  }, [siteId, sites, siteDataset]);
 
   useEffect(() => {
     if (!siteNoticeTypes.includes(noticeType)) {
@@ -233,6 +235,13 @@ export function BidNoticeInquiry({
       setPage(1);
     }
   }, [siteNoticeTypes, noticeType]);
+
+  useEffect(() => {
+    if (noticeType !== "BID") {
+      setPurchaseTypeFilter("");
+      setPurchaseTypes([]);
+    }
+  }, [noticeType]);
 
   const activeKeywordCount = activeKeywords.length;
 
@@ -283,24 +292,19 @@ export function BidNoticeInquiry({
       }
       const activeSites = (data.sites ?? []).filter((s) => s.is_active !== false);
       setSites(activeSites);
-      if (activeSites.length > 0) {
-        const stored =
-          typeof window !== "undefined"
-            ? localStorage.getItem(SITE_STORAGE_KEY)
-            : null;
-        setSiteId((prev) => {
-          if (prev != null && activeSites.some((s) => s.id === prev)) {
-            return prev;
-          }
-          if (
-            initialSiteIdFromUrl != null &&
-            activeSites.some((s) => s.id === initialSiteIdFromUrl)
-          ) {
-            return initialSiteIdFromUrl;
-          }
-          return resolveInitialSiteId(activeSites, stored);
-        });
+      // 디폴트는 항상 전체. URL에 siteId가 있을 때만 해당 사이트 선택
+      if (
+        initialSiteIdFromUrl != null &&
+        activeSites.some((s) => s.id === initialSiteIdFromUrl)
+      ) {
+        setSiteId(initialSiteIdFromUrl);
+      } else {
+        setSiteId(null);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(SITE_STORAGE_KEY, "all");
+        }
       }
+      setSitesReady(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
     } finally {
@@ -309,16 +313,18 @@ export function BidNoticeInquiry({
   }, []);
 
   const loadFavoriteIds = useCallback(async () => {
-    if (siteId == null) {
+    if (!sitesReady) {
       setFavoriteIds(new Set());
       return;
     }
 
     try {
       const params = new URLSearchParams({
-        siteId: String(siteId),
         noticeType,
       });
+      if (siteId != null) {
+        params.set("siteId", String(siteId));
+      }
       const response = await fetch(`/api/bid-favorites?${params}`);
       const data = (await response.json()) as {
         noticeIds?: string[];
@@ -332,7 +338,7 @@ export function BidNoticeInquiry({
       setFavoriteIds(new Set());
       setError(err instanceof Error ? err.message : "관심공고 목록을 불러오지 못했습니다.");
     }
-  }, [siteId, noticeType]);
+  }, [sitesReady, siteId, noticeType]);
 
   const loadSubmissionIds = useCallback(async () => {
     try {
@@ -388,16 +394,18 @@ export function BidNoticeInquiry({
   }, []);
 
   const loadScreeningStatuses = useCallback(async () => {
-    if (siteId == null) {
+    if (!sitesReady) {
       setScreeningStatuses({});
       return;
     }
 
     try {
       const params = new URLSearchParams({
-        siteId: String(siteId),
         noticeType,
       });
+      if (siteId != null) {
+        params.set("siteId", String(siteId));
+      }
       const response = await fetch(`/api/bid-notice-screening?${params}`);
       const data = (await response.json()) as {
         statuses?: Record<string, BidNoticeScreeningStatus>;
@@ -413,7 +421,7 @@ export function BidNoticeInquiry({
         err instanceof Error ? err.message : "선별 상태를 불러오지 못했습니다.",
       );
     }
-  }, [siteId, noticeType]);
+  }, [sitesReady, siteId, noticeType]);
 
   const loadDepartments = useCallback(async () => {
     try {
@@ -432,16 +440,18 @@ export function BidNoticeInquiry({
   }, []);
 
   const loadAssignments = useCallback(async () => {
-    if (siteId == null) {
+    if (!sitesReady) {
       setAssignments({});
       return;
     }
 
     try {
       const params = new URLSearchParams({
-        siteId: String(siteId),
         noticeType,
       });
+      if (siteId != null) {
+        params.set("siteId", String(siteId));
+      }
       const response = await fetch(`/api/bid-notice-assignments?${params}`);
       const data = (await response.json()) as {
         assignments?: Record<string, BidNoticeAssignment>;
@@ -457,7 +467,7 @@ export function BidNoticeInquiry({
         err instanceof Error ? err.message : "담당 지정 정보를 불러오지 못했습니다.",
       );
     }
-  }, [siteId, noticeType]);
+  }, [sitesReady, siteId, noticeType]);
 
   const handleAssignmentSaved = useCallback(
     (assignment: BidNoticeAssignment) => {
@@ -491,7 +501,7 @@ export function BidNoticeInquiry({
   }, []);
 
   const loadNotices = useCallback(async () => {
-    if (siteId == null) {
+    if (!sitesReady) {
       setNotices([]);
       setTotal(0);
       return;
@@ -501,7 +511,7 @@ export function BidNoticeInquiry({
     setError("");
     try {
       const params = new URLSearchParams({
-        siteId: String(siteId),
+        siteId: siteId == null ? "all" : String(siteId),
         noticeType,
         page: String(page),
         pageSize: String(PAGE_SIZE),
@@ -509,6 +519,7 @@ export function BidNoticeInquiry({
       if (search) params.set("search", search);
       if (favoritesOnly) params.set("favoritesOnly", "true");
       if (keywordScreeningOnly) params.set("keywordScreeningOnly", "true");
+      if (purchaseTypeFilter) params.set("purchaseType", purchaseTypeFilter);
       if (deadlineWindow) params.set("deadlineWindow", deadlineWindow);
       if (deadlineClosed) params.set("deadlineClosed", "true");
       if (noticeDateFilter) {
@@ -521,6 +532,7 @@ export function BidNoticeInquiry({
       const data = (await response.json()) as {
         notices?: KhnpBidNoticeRow[];
         total?: number;
+        purchaseTypes?: string[];
         error?: string;
       };
       if (!response.ok) {
@@ -528,20 +540,32 @@ export function BidNoticeInquiry({
       }
       setNotices(data.notices ?? []);
       setTotal(data.total ?? 0);
+      setPurchaseTypes(data.purchaseTypes ?? []);
+      if (
+        purchaseTypeFilter &&
+        data.purchaseTypes &&
+        data.purchaseTypes.length > 0 &&
+        !data.purchaseTypes.includes(purchaseTypeFilter)
+      ) {
+        setPurchaseTypeFilter("");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
       setNotices([]);
       setTotal(0);
+      setPurchaseTypes([]);
     } finally {
       setIsLoadingNotices(false);
     }
   }, [
+    sitesReady,
     siteId,
     noticeType,
     page,
     search,
     favoritesOnly,
     keywordScreeningOnly,
+    purchaseTypeFilter,
     deadlineWindow,
     deadlineClosed,
     noticeDateYesterday,
@@ -787,10 +811,11 @@ export function BidNoticeInquiry({
     [detailNotice?.id, refreshDetailActivities, router],
   );
 
-  function handleSiteChange(id: number) {
+  function handleSiteChange(id: number | null) {
     setSiteId(id);
+    setPurchaseTypeFilter("");
     setPage(1);
-    localStorage.setItem(SITE_STORAGE_KEY, String(id));
+    localStorage.setItem(SITE_STORAGE_KEY, id == null ? "all" : String(id));
   }
 
   async function openDetail(noticeId: string) {
@@ -853,6 +878,7 @@ export function BidNoticeInquiry({
 
   function handleNoticeTypeChange(type: BidNoticeType) {
     setNoticeType(type);
+    setPurchaseTypeFilter("");
     setPage(1);
   }
 
@@ -868,7 +894,7 @@ export function BidNoticeInquiry({
   }
 
   async function fetchAllNoticesForExport(): Promise<KhnpBidNoticeRow[]> {
-    if (siteId == null) return [];
+    if (!sitesReady) return [];
 
     const all: KhnpBidNoticeRow[] = [];
     let exportPage = 1;
@@ -876,7 +902,7 @@ export function BidNoticeInquiry({
 
     while (all.length < MAX_EXPORT_ROWS) {
       const params = new URLSearchParams({
-        siteId: String(siteId),
+        siteId: siteId == null ? "all" : String(siteId),
         noticeType,
         page: String(exportPage),
         pageSize: String(EXPORT_PAGE_SIZE),
@@ -884,6 +910,7 @@ export function BidNoticeInquiry({
       if (search) params.set("search", search);
       if (favoritesOnly) params.set("favoritesOnly", "true");
       if (keywordScreeningOnly) params.set("keywordScreeningOnly", "true");
+      if (purchaseTypeFilter) params.set("purchaseType", purchaseTypeFilter);
       if (deadlineWindow) params.set("deadlineWindow", deadlineWindow);
       if (deadlineClosed) params.set("deadlineClosed", "true");
       if (noticeDateFilter) {
@@ -919,7 +946,7 @@ export function BidNoticeInquiry({
   }
 
   async function handleExcelExport() {
-    if (siteId == null || !selectedSite || total === 0) return;
+    if (!sitesReady || total === 0) return;
 
     setIsExporting(true);
     setError("");
@@ -931,7 +958,7 @@ export function BidNoticeInquiry({
       downloadBidNoticeExcel(rows, {
         noticeType,
         favoriteIds,
-        siteName: selectedSite.site_name,
+        siteName: selectedSite?.site_name ?? "전체",
         favoritesOnly,
       });
     } catch (err) {
@@ -990,6 +1017,8 @@ export function BidNoticeInquiry({
         selectedSiteId={siteId}
         onSelect={handleSiteChange}
         isLoading={isLoadingSites}
+        allowAll
+        variant="compact"
       />
 
       <form
@@ -1012,7 +1041,7 @@ export function BidNoticeInquiry({
           <button
             type="button"
             onClick={() => loadNotices()}
-            disabled={isLoadingNotices || siteId == null}
+            disabled={isLoadingNotices || !sitesReady}
             className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
           >
             새로고침
@@ -1020,7 +1049,9 @@ export function BidNoticeInquiry({
           <button
             type="button"
             onClick={() => setManualFormMode("create")}
-            disabled={siteId == null || !supportsManualBidNoticeEntry(siteDataset)}
+            disabled={
+              siteId == null || !supportsManualBidNoticeEntry(siteDataset)
+            }
             className="shrink-0 rounded-lg bg-[#a4ce39] px-4 py-2 text-sm font-semibold text-[#004b87] hover:bg-[#95bd33] disabled:opacity-40"
           >
             공고 직접 등록
@@ -1031,7 +1062,7 @@ export function BidNoticeInquiry({
             disabled={
               isExporting ||
               isLoadingNotices ||
-              siteId == null ||
+              !sitesReady ||
               total === 0
             }
             className="shrink-0 rounded-lg border border-[#009ada] px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#009ada]/5 disabled:opacity-40"
@@ -1040,94 +1071,96 @@ export function BidNoticeInquiry({
           </button>
       </form>
 
-      <div className="mt-4 flex flex-wrap items-center gap-4">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={favoritesOnly}
-            onChange={(e) => {
-              setFavoritesOnly(e.target.checked);
-              setPage(1);
-            }}
-            className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
-          />
-          관심공고만 보기
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={keywordScreeningOnly}
-            onChange={(e) => {
-              setKeywordScreeningOnly(e.target.checked);
-              setPage(1);
-            }}
-            className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
-          />
-          자동선별
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={favoritesOnly}
+              onChange={(e) => {
+                setFavoritesOnly(e.target.checked);
+                setPage(1);
+              }}
+              className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
+            />
+            관심공고만 보기
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={keywordScreeningOnly}
+              onChange={(e) => {
+                setKeywordScreeningOnly(e.target.checked);
+                setPage(1);
+              }}
+              className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
+            />
+            자동선별
+            {activeKeywordCount > 0 ? (
+              <span className="text-xs text-slate-500">
+                (키워드 {activeKeywordCount.toLocaleString("ko-KR")}개)
+              </span>
+            ) : null}
+          </label>
           {activeKeywordCount > 0 ? (
-            <span className="text-xs text-slate-500">
-              (키워드 {activeKeywordCount.toLocaleString("ko-KR")}개)
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowRegisteredKeywords((prev) => !prev)}
+              className="text-xs text-[#004b87] underline hover:text-[#003d6e]"
+            >
+              {showRegisteredKeywords ? "키워드 숨기기" : "키워드 보기"}
+            </button>
           ) : null}
-        </label>
-        {activeKeywordCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => setShowRegisteredKeywords((prev) => !prev)}
-            className="text-xs text-[#004b87] underline hover:text-[#003d6e]"
-          >
-            {showRegisteredKeywords ? "키워드 숨기기" : "키워드 보기"}
-          </button>
-        ) : null}
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={noticeDateYesterday}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setNoticeDateYesterday(checked);
-              if (checked) {
-                setNoticeDateFilter(null);
-                syncNoticeDateInUrl(null);
-              }
-              setPage(1);
-            }}
-            disabled={Boolean(noticeDateFilter)}
-            className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
-          />
-          {NOTICE_DATE_YESTERDAY_LABEL}
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={deadlineClosed}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setDeadlineClosed(checked);
-              if (checked) {
-                setDeadlineWindow(null);
-              }
-              setPage(1);
-            }}
-            className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
-          />
-          {DEADLINE_CLOSED_LABEL}
-        </label>
-        {noticeDateFilter ? (
-          <button
-            type="button"
-            onClick={clearNoticeDateFilter}
-            className="inline-flex items-center gap-1 rounded-full border border-[#1E5FD4]/30 bg-[#E8F0FE] px-2.5 py-0.5 text-xs font-medium text-[#1E5FD4] hover:bg-[#1E5FD4]/10"
-          >
-            {formatNoticeDateFilterSummary(noticeDateFilter)}
-            <span aria-hidden>×</span>
-          </button>
-        ) : null}
-        <span className="text-xs text-slate-500">
-          관심 등록 {favoriteIds.size.toLocaleString("ko-KR")}건 · 입찰 등록{" "}
-          {submissionIds.size.toLocaleString("ko-KR")}건 · 견적 등록{" "}
-          {estimateIds.size.toLocaleString("ko-KR")}건
-        </span>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={noticeDateYesterday}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setNoticeDateYesterday(checked);
+                if (checked) {
+                  setNoticeDateFilter(null);
+                  syncNoticeDateInUrl(null);
+                }
+                setPage(1);
+              }}
+              disabled={Boolean(noticeDateFilter)}
+              className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
+            />
+            {NOTICE_DATE_YESTERDAY_LABEL}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={deadlineClosed}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setDeadlineClosed(checked);
+                if (checked) {
+                  setDeadlineWindow(null);
+                }
+                setPage(1);
+              }}
+              className="size-4 rounded border-slate-300 text-[#004b87] focus:ring-[#009ada]/20"
+            />
+            {DEADLINE_CLOSED_LABEL}
+          </label>
+          {noticeDateFilter ? (
+            <button
+              type="button"
+              onClick={clearNoticeDateFilter}
+              className="inline-flex items-center gap-1 rounded-full border border-[#1E5FD4]/30 bg-[#E8F0FE] px-2.5 py-0.5 text-xs font-medium text-[#1E5FD4] hover:bg-[#1E5FD4]/10"
+            >
+              {formatNoticeDateFilterSummary(noticeDateFilter)}
+              <span aria-hidden>×</span>
+            </button>
+          ) : null}
+          <span className="text-xs text-slate-500">
+            관심 등록 {favoriteIds.size.toLocaleString("ko-KR")}건 · 입찰 등록{" "}
+            {submissionIds.size.toLocaleString("ko-KR")}건 · 견적 등록{" "}
+            {estimateIds.size.toLocaleString("ko-KR")}건
+          </span>
+        </div>
       </div>
 
       {showRegisteredKeywords && activeKeywords.length > 0 ? (
@@ -1144,21 +1177,44 @@ export function BidNoticeInquiry({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        {siteNoticeTypes.map((type) => (
-          <button
-            key={type}
-            type="button"
-            onClick={() => handleNoticeTypeChange(type)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              noticeType === type
-                ? "bg-[#004b87] text-white"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            {BID_NOTICE_TYPE_LABELS[type]}
-          </button>
-        ))}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex flex-wrap gap-2">
+          {siteNoticeTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => handleNoticeTypeChange(type)}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                noticeType === type
+                  ? "bg-[#004b87] text-white"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {BID_NOTICE_TYPE_LABELS[type]}
+            </button>
+          ))}
+        </div>
+        {noticeType === "BID" ? (
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <span className="shrink-0 font-medium text-slate-600">구분</span>
+            <select
+              value={purchaseTypeFilter}
+              onChange={(event) => {
+                setPurchaseTypeFilter(event.target.value);
+                setPage(1);
+              }}
+              disabled={!sitesReady || isLoadingNotices}
+              className="min-w-[10rem] rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20 disabled:opacity-40"
+            >
+              <option value="">전체</option>
+              {purchaseTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       {deadlineWindow ? (
@@ -1176,11 +1232,13 @@ export function BidNoticeInquiry({
         </div>
       ) : null}
 
-      {selectedSite ? (
+      {sitesReady ? (
         <p className="mt-3 text-sm text-slate-500">
-          {selectedSite.site_name} · {BID_NOTICE_TYPE_LABELS[noticeType]}
+          {selectedSite ? selectedSite.site_name : "전체 사이트"} ·{" "}
+          {BID_NOTICE_TYPE_LABELS[noticeType]}
           {favoritesOnly ? " · 관심공고" : ""}
           {keywordScreeningOnly ? " · 자동선별" : ""}
+          {purchaseTypeFilter ? ` · 구분 ${purchaseTypeFilter}` : ""}
           {noticeDateFilter
             ? ` · ${formatNoticeDateFilterSummary(noticeDateFilter)}`
             : noticeDateYesterday
@@ -1362,7 +1420,10 @@ export function BidNoticeInquiry({
       {detailNotice ? (
         <BidNoticeDetailModal
           notice={detailNotice}
-          siteName={selectedSite?.site_name}
+          siteName={
+            selectedSite?.site_name ??
+            sites.find((s) => s.id === detailNotice.site_id)?.site_name
+          }
           isFavorite={detailIsFavorite}
           isSubmitted={detailIsSubmitted}
           isEstimated={detailIsEstimated}

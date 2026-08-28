@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { getCrawlSites } from "@/lib/crawl-sites";
 import type { DeadlineWindow } from "./deadline";
 import {
   getNoticeSearchOrFilter,
@@ -8,7 +9,9 @@ import {
   getNoticeTypeDbValues,
   hasNoticeDateColumn,
   isCrawlMasterDataset,
+  isNoticeTypeValidForDataset,
   resolveBidNoticeDatasetForSiteId,
+  resolveBidNoticeDatasetFromSite,
   type BidNoticeDataset,
   type CrawlMasterDataset,
 } from "./dataset";
@@ -40,7 +43,7 @@ import type {
   KrBidNoticeRow,
   LhBidNoticeRow,
 } from "./types";
-import { chunkIds } from "./utils";
+import { chunkIds, getOpenDetail } from "./utils";
 import { matchesExListNoticeType } from "./normalize-ex";
 import { matchesG2bListNoticeType } from "./normalize-g2b";
 import { matchesKogasListNoticeType } from "./normalize-kogas";
@@ -63,7 +66,8 @@ export {
 } from "./notice-repository";
 
 export interface ListBidNoticesOptions {
-  siteId: number;
+  /** null/undefined = 전체 사이트 */
+  siteId?: number | null;
   noticeType: BidNoticeType;
   page?: number;
   pageSize?: number;
@@ -75,6 +79,50 @@ export interface ListBidNoticesOptions {
   noticeDateYesterday?: boolean;
   noticeDate?: string;
   keywordScreeningOnly?: boolean;
+  /** 입찰공고 목록 「구분」(purchase_type) 필터 */
+  purchaseType?: string | null;
+}
+
+function getNoticePurchaseType(notice: KhnpBidNoticeRow): string | null {
+  const value = getOpenDetail(notice)?.purchase_type?.trim();
+  return value ? value : null;
+}
+
+function collectPurchaseTypes(notices: KhnpBidNoticeRow[]): string[] {
+  const values = new Set<string>();
+  for (const notice of notices) {
+    const value = getNoticePurchaseType(notice);
+    if (value) values.add(value);
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, "ko"));
+}
+
+function applyPurchaseTypeFilter(
+  notices: KhnpBidNoticeRow[],
+  purchaseType?: string | null,
+): KhnpBidNoticeRow[] {
+  const trimmed = purchaseType?.trim();
+  if (!trimmed) return notices;
+  return notices.filter(
+    (notice) => getNoticePurchaseType(notice) === trimmed,
+  );
+}
+
+function finalizeNoticePage(
+  notices: KhnpBidNoticeRow[],
+  options: Pick<ListBidNoticesOptions, "purchaseType">,
+  page: number,
+  pageSize: number,
+): BidNoticeListResult {
+  const purchaseTypes = collectPurchaseTypes(notices);
+  const filtered = applyPurchaseTypeFilter(notices, options.purchaseType);
+  const from = (page - 1) * pageSize;
+  return {
+    notices: filtered.slice(from, from + pageSize),
+    total: filtered.length,
+    purchaseTypes,
+    error: null,
+  };
 }
 
 type NoticeQuery = {
@@ -219,12 +267,10 @@ const CRAWL_MASTER_FALLBACK_DETAIL_KEYS: Record<
 
 async function listCrawlMasterBidNotices(
   dataset: CrawlMasterDataset,
-  options: ListBidNoticesOptions,
+  options: ListBidNoticesOptions & { siteId: number },
   page: number,
   pageSize: number,
 ): Promise<BidNoticeListResult> {
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
   const detailKeys = CRAWL_MASTER_FALLBACK_DETAIL_KEYS[dataset];
   const matchNoticeType = CRAWL_MASTER_LIST_MATCHERS[dataset];
 
@@ -309,7 +355,7 @@ async function listCrawlMasterBidNotices(
     }
     const { noticeIds: favoriteIds, error: favError } = await getFavoriteNoticeIds(
       options.userId,
-      { siteId: options.siteId, noticeType: options.noticeType },
+      { siteId: options.siteId ?? undefined, noticeType: options.noticeType },
     );
     if (favError) {
       return { notices: [], total: 0, error: favError };
@@ -338,11 +384,7 @@ async function listCrawlMasterBidNotices(
     notices = notices.filter((notice) => isDeadlineExpired(notice, now));
   }
 
-  return {
-    notices: notices.slice(from, to + 1),
-    total: notices.length,
-    error: null,
-  };
+  return finalizeNoticePage(notices, options, page, pageSize);
 }
 
 export async function listBidNotices(
@@ -352,11 +394,110 @@ export async function listBidNotices(
     return { notices: [], total: 0, error: null };
   }
 
-  const dataset = await resolveBidNoticeDatasetForSiteId(options.siteId);
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 20));
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+
+  if (options.siteId == null) {
+    return listBidNoticesAcrossSites(options, page, pageSize);
+  }
+
+  return listBidNoticesForSite(
+    { ...options, siteId: options.siteId },
+    page,
+    pageSize,
+  );
+}
+
+async function listAllNoticesForSite(
+  siteId: number,
+  options: Omit<ListBidNoticesOptions, "siteId" | "page" | "pageSize">,
+): Promise<BidNoticeListResult> {
+  const pageSize = 100;
+  let page = 1;
+  const notices: KhnpBidNoticeRow[] = [];
+  let total = Infinity;
+
+  while (notices.length < total && page <= 40) {
+    const result = await listBidNoticesForSite(
+      { ...options, siteId, page, pageSize },
+      page,
+      pageSize,
+    );
+    if (result.error) {
+      return result;
+    }
+    total = result.total;
+    notices.push(...result.notices);
+    if (result.notices.length === 0) break;
+    page += 1;
+  }
+
+  return { notices, total: notices.length, error: null };
+}
+
+async function listBidNoticesAcrossSites(
+  options: ListBidNoticesOptions,
+  page: number,
+  pageSize: number,
+): Promise<BidNoticeListResult> {
+  const { sites, error: sitesError } = await getCrawlSites({ activeOnly: true });
+  if (sitesError) {
+    return { notices: [], total: 0, error: sitesError };
+  }
+
+  const eligibleSites = sites.filter((site) => {
+    const dataset = resolveBidNoticeDatasetFromSite(site);
+    return isNoticeTypeValidForDataset(dataset, options.noticeType);
+  });
+
+  if (eligibleSites.length === 0) {
+    return { notices: [], total: 0, error: null };
+  }
+
+  const results = await Promise.all(
+    eligibleSites.map((site) =>
+      listAllNoticesForSite(site.id, {
+        noticeType: options.noticeType,
+        search: options.search,
+        favoritesOnly: options.favoritesOnly,
+        userId: options.userId,
+        deadlineWindow: options.deadlineWindow,
+        deadlineClosed: options.deadlineClosed,
+        noticeDateYesterday: options.noticeDateYesterday,
+        noticeDate: options.noticeDate,
+        keywordScreeningOnly: options.keywordScreeningOnly,
+      }),
+    ),
+  );
+
+  const firstError = results.find((result) => result.error)?.error ?? null;
+  if (firstError) {
+    return { notices: [], total: 0, error: firstError };
+  }
+
+  const merged = results.flatMap((result) => result.notices);
+  const seen = new Set<string>();
+  const unique = merged.filter((notice) => {
+    if (seen.has(notice.id)) return false;
+    seen.add(notice.id);
+    return true;
+  });
+
+  unique.sort((a, b) => {
+    const aTime = Date.parse(a.notice_date ?? a.created_at ?? "") || 0;
+    const bTime = Date.parse(b.notice_date ?? b.created_at ?? "") || 0;
+    return bTime - aTime;
+  });
+
+  return finalizeNoticePage(unique, options, page, pageSize);
+}
+
+async function listBidNoticesForSite(
+  options: ListBidNoticesOptions & { siteId: number },
+  page: number,
+  pageSize: number,
+): Promise<BidNoticeListResult> {
+  const dataset = await resolveBidNoticeDatasetForSiteId(options.siteId);
 
   if (isCrawlMasterDataset(dataset)) {
     try {
@@ -461,11 +602,7 @@ export async function listBidNotices(
         return { notices: [], total: 0, error };
       }
 
-      return {
-        notices: sorted.slice(from, to + 1),
-        total: sorted.length,
-        error: null,
-      };
+      return finalizeNoticePage(sorted, options, page, pageSize);
     }
 
     const deadlineStatus = options.deadlineClosed ? "expired" : "active";
@@ -489,11 +626,7 @@ export async function listBidNotices(
       return { notices: [], total: 0, error };
     }
 
-    return {
-      notices: sorted.slice(from, to + 1),
-      total: sorted.length,
-      error: null,
-    };
+    return finalizeNoticePage(sorted, options, page, pageSize);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "입찰공고 조회에 실패했습니다.";

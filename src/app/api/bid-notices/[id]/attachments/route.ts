@@ -51,9 +51,9 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const session = await requireApiAdmin();
-  if (session instanceof NextResponse) {
-    return session;
+  const session = await getApiSession();
+  if (!session) {
+    return unauthorizedResponse();
   }
   if (!isSupabaseConfigured()) {
     return supabaseNotConfiguredResponse();

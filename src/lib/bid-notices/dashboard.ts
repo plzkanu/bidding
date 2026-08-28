@@ -4,15 +4,13 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 import { listUserEstimateSubmissions } from "./estimates";
 
-import { getFavoriteNoticeIds } from "./favorites";
+import { getFavoriteNoticeIds, getOtherDepartmentFavoriteRows } from "./favorites";
 
 import { listUserBidSubmissions } from "./submissions";
 
 import { listUserOrderReports } from "./order-reports";
 
 import { getScreeningStatusMap } from "./screening";
-
-import { formatDeptNameForList } from "./utils";
 
 import {
   getKstRollingMonthRange,
@@ -109,6 +107,9 @@ export interface DashboardCalendarNotice {
 
   siteName: string | null;
 
+  /** mine = 내 관심, other = 타부서 관심, both = 둘 다, none = 일반(전체 모드) */
+  favoriteSource?: "mine" | "other" | "both" | "none";
+
 }
 
 
@@ -120,6 +121,12 @@ export interface DashboardNoticeCalendar {
   rangeEnd: string;
 
   countsByDate: Record<string, number>;
+
+  /** 관심공고만 모드: 내 관심공고 건수 */
+  mineCountsByDate: Record<string, number>;
+
+  /** 관심공고만 모드: 타부서 관심공고 건수 */
+  otherDeptCountsByDate: Record<string, number>;
 
   noticesByDate: Record<string, DashboardCalendarNotice[]>;
 
@@ -159,17 +166,23 @@ export interface DashboardEstimateEntry {
 
 
 
-export interface DashboardOrgActivity {
+export interface DashboardOtherDeptFavoriteItem {
 
-  label: string;
+  notice: KhnpBidNoticeRow;
 
-  participateCount: number;
+  siteName: string | null;
 
-  bidCount: number;
+  department: string;
+
+  favoritedBy: Array<{ userId: string; name: string }>;
+
+  latestFavoritedAt: string | null;
 
 }
 
 
+
+export type DashboardScope = "all" | "favorites";
 
 export interface DashboardData {
 
@@ -185,7 +198,7 @@ export interface DashboardData {
 
   estimates: DashboardEstimateEntry[];
 
-  orgActivity: DashboardOrgActivity[];
+  otherDeptFavorites: DashboardOtherDeptFavoriteItem[];
 
   error: string | null;
 
@@ -298,6 +311,10 @@ function emptyNoticeCalendar(): DashboardNoticeCalendar {
 
     countsByDate: {},
 
+    mineCountsByDate: {},
+
+    otherDeptCountsByDate: {},
+
     noticesByDate: {},
 
   };
@@ -308,7 +325,11 @@ function emptyNoticeCalendar(): DashboardNoticeCalendar {
 
 function buildNoticeCalendar(
 
-  notices: Array<{ notice: KhnpBidNoticeRow; siteName: string | null }>,
+  notices: Array<{
+    notice: KhnpBidNoticeRow;
+    siteName: string | null;
+    favoriteSource?: DashboardCalendarNotice["favoriteSource"];
+  }>,
 
   now: Date,
 
@@ -317,6 +338,10 @@ function buildNoticeCalendar(
   const { startYmd, endYmd } = getKstRollingMonthRange(now);
 
   const countsByDate: Record<string, number> = {};
+
+  const mineCountsByDate: Record<string, number> = {};
+
+  const otherDeptCountsByDate: Record<string, number> = {};
 
   const noticesByDate: Record<string, DashboardCalendarNotice[]> = {};
 
@@ -334,9 +359,21 @@ function buildNoticeCalendar(
 
     countsByDate[ymd] = (countsByDate[ymd] ?? 0) + 1;
 
+    const source = item.favoriteSource ?? "none";
+    if (source === "mine" || source === "both") {
+      mineCountsByDate[ymd] = (mineCountsByDate[ymd] ?? 0) + 1;
+    }
+    if (source === "other" || source === "both") {
+      otherDeptCountsByDate[ymd] = (otherDeptCountsByDate[ymd] ?? 0) + 1;
+    }
+
     const bucket = noticesByDate[ymd] ?? [];
 
-    bucket.push({ notice: item.notice, siteName: item.siteName });
+    bucket.push({
+      notice: item.notice,
+      siteName: item.siteName,
+      favoriteSource: source,
+    });
 
     noticesByDate[ymd] = bucket;
 
@@ -360,61 +397,14 @@ function buildNoticeCalendar(
 
 
 
-  return { rangeStart: startYmd, rangeEnd: endYmd, countsByDate, noticesByDate };
-
-}
-
-
-
-function buildOrgActivity(
-
-  notices: KhnpBidNoticeRow[],
-
-  bidIds: Set<string>,
-
-): DashboardOrgActivity[] {
-
-  const map = new Map<string, { participate: number; bid: number }>();
-
-
-
-  for (const notice of notices) {
-
-    const formatted = formatDeptNameForList(notice.dept_name);
-
-    const label = formatted === "-" ? "미기재" : formatted;
-
-    const current = map.get(label) ?? { participate: 0, bid: 0 };
-
-    current.participate += 1;
-
-    if (bidIds.has(notice.id)) {
-
-      current.bid += 1;
-
-    }
-
-    map.set(label, current);
-
-  }
-
-
-
-  return [...map.entries()]
-
-    .map(([label, counts]) => ({
-
-      label,
-
-      participateCount: counts.participate,
-
-      bidCount: counts.bid,
-
-    }))
-
-    .sort((a, b) => b.participateCount - a.participateCount)
-
-    .slice(0, 5);
+  return {
+    rangeStart: startYmd,
+    rangeEnd: endYmd,
+    countsByDate,
+    mineCountsByDate,
+    otherDeptCountsByDate,
+    noticesByDate,
+  };
 
 }
 
@@ -425,6 +415,12 @@ export async function getDashboardData(options: {
   userId: string;
 
   siteId: number;
+
+  /** 현재 사용자 부서 — 타부서 관심공고 판별용 */
+  department?: string;
+
+  /** all = 사이트 전체, favorites = 관심공고만 */
+  scope?: DashboardScope;
 
   favoriteLimit?: number;
 
@@ -446,7 +442,7 @@ export async function getDashboardData(options: {
 
       estimates: [],
 
-      orgActivity: [],
+      otherDeptFavorites: [],
 
       error: null,
 
@@ -457,6 +453,9 @@ export async function getDashboardData(options: {
 
 
   const limit = Math.min(50, Math.max(1, options.favoriteLimit ?? 15));
+
+  const scope: DashboardScope =
+    options.scope === "favorites" ? "favorites" : "all";
 
   const now = new Date();
 
@@ -483,6 +482,12 @@ export async function getDashboardData(options: {
 
       { noticeIds: favoriteIdsList, error: favError },
 
+      {
+        rows: otherDeptFavRows,
+        noticeIds: otherDeptNoticeIds,
+        error: otherDeptFavError,
+      },
+
       { submissions: bidSubmissions, error: bidError },
 
       { submissions: estimateSubmissions, error: estimateError },
@@ -500,6 +505,12 @@ export async function getDashboardData(options: {
     ] = await Promise.all([
 
       getFavoriteNoticeIds(options.userId, { siteId: options.siteId }),
+
+      getOtherDepartmentFavoriteRows({
+        currentUserId: options.userId,
+        currentDepartment: options.department ?? "",
+        siteId: options.siteId,
+      }),
 
       listUserBidSubmissions(options.userId),
 
@@ -563,6 +574,8 @@ export async function getDashboardData(options: {
 
       favError ??
 
+      otherDeptFavError ??
+
       bidError ??
 
       estimateError ??
@@ -593,7 +606,7 @@ export async function getDashboardData(options: {
 
       estimates: [],
 
-      orgActivity: [],
+      otherDeptFavorites: [],
 
       error: typeof firstError === "string" ? firstError : firstError.message,
 
@@ -604,6 +617,7 @@ export async function getDashboardData(options: {
 
 
     const favoriteIds = new Set(favoriteIdsList);
+    const otherDeptFavoriteIds = new Set(otherDeptNoticeIds);
 
     const siteBidIds = new Set(
 
@@ -677,7 +691,7 @@ export async function getDashboardData(options: {
 
         .order(listOrderColumn, { ascending: false, nullsFirst: false })
 
-        .limit(limit);
+        .limit(Math.min(500, Math.max(limit, favoriteIds.size)));
 
 
 
@@ -697,7 +711,7 @@ export async function getDashboardData(options: {
 
           estimates: [],
 
-          orgActivity: [],
+          otherDeptFavorites: [],
 
           error: favListError.message,
 
@@ -722,9 +736,17 @@ export async function getDashboardData(options: {
 
 
 
+    const approachingSource =
+      scope === "favorites"
+        ? favorites
+        : [
+            ...favorites,
+            ...activeNotices.filter(({ notice }) => !favoriteIds.has(notice.id)),
+          ];
+
     const approachingCounts = emptyCounts();
 
-    for (const { notice } of favorites) {
+    for (const { notice } of approachingSource) {
 
       const noticeType = notice.notice_type;
 
@@ -756,7 +778,10 @@ export async function getDashboardData(options: {
 
 
 
-    const reviewingCount = favorites.filter(
+    const reviewingSource =
+      scope === "favorites" ? favorites : activeNotices;
+
+    const reviewingCount = reviewingSource.filter(
 
       ({ notice }) => !isDeadlineExpired(notice, now),
 
@@ -764,7 +789,7 @@ export async function getDashboardData(options: {
 
 
 
-    const calendarNotices = ((calendarRows ?? []) as unknown as Array<
+    const calendarNoticesRaw = ((calendarRows ?? []) as unknown as Array<
       (KhnpBidNoticeRow | SrmBidNoticeRow) & {
         crawl_sites: { site_name: string } | { site_name: string }[] | null;
       }
@@ -776,19 +801,148 @@ export async function getDashboardData(options: {
       };
     });
 
+    // 타부서 관심공고 상세 (캘린더·패널용)
+    const otherDeptMetaById = new Map(
+      otherDeptFavRows.map((row) => [row.noticeId, row]),
+    );
+    let otherDeptNoticeItems: Array<{
+      notice: KhnpBidNoticeRow;
+      siteName: string | null;
+    }> = [];
 
+    if (otherDeptFavoriteIds.size > 0) {
+      const { data: otherRows, error: otherListError } = await supabase
+        .from(noticeTable)
+        .select(noticeSelect)
+        .in("id", [...otherDeptFavoriteIds])
+        .eq("site_id", options.siteId)
+        .eq("is_deleted", false)
+        .order(listOrderColumn, { ascending: false, nullsFirst: false })
+        .limit(500);
+
+      if (otherListError) {
+        return {
+          favorites: [],
+          approachingCounts: emptyCounts(),
+          kpis: emptyKpis(),
+          noticeCalendar: emptyNoticeCalendar(),
+          deadlineSchedule: [],
+          estimates: [],
+          otherDeptFavorites: [],
+          error: otherListError.message,
+        };
+      }
+
+      otherDeptNoticeItems = (otherRows ?? []).map((row) => {
+        const typedRow = row as unknown as (KhnpBidNoticeRow | SrmBidNoticeRow) & {
+          crawl_sites: { site_name: string } | { site_name: string }[] | null;
+        };
+        const { crawl_sites } = typedRow;
+        return {
+          notice: mapDashboardNoticeRow(dataset, typedRow),
+          siteName: resolveSiteName(crawl_sites),
+        };
+      });
+    }
+
+    const resolveFavoriteSource = (
+      noticeId: string,
+    ): DashboardCalendarNotice["favoriteSource"] => {
+      const isMine = favoriteIds.has(noticeId);
+      const isOther = otherDeptFavoriteIds.has(noticeId);
+      if (isMine && isOther) return "both";
+      if (isMine) return "mine";
+      if (isOther) return "other";
+      return "none";
+    };
+
+    let calendarNotices: Array<{
+      notice: KhnpBidNoticeRow;
+      siteName: string | null;
+      favoriteSource?: DashboardCalendarNotice["favoriteSource"];
+    }>;
+
+    if (scope === "favorites") {
+      const byId = new Map<
+        string,
+        {
+          notice: KhnpBidNoticeRow;
+          siteName: string | null;
+          favoriteSource: DashboardCalendarNotice["favoriteSource"];
+        }
+      >();
+      for (const item of favorites) {
+        byId.set(item.notice.id, {
+          notice: item.notice,
+          siteName: item.siteName,
+          favoriteSource: resolveFavoriteSource(item.notice.id),
+        });
+      }
+      for (const item of otherDeptNoticeItems) {
+        const existing = byId.get(item.notice.id);
+        if (existing) {
+          existing.favoriteSource = resolveFavoriteSource(item.notice.id);
+        } else {
+          byId.set(item.notice.id, {
+            notice: item.notice,
+            siteName: item.siteName,
+            favoriteSource: resolveFavoriteSource(item.notice.id),
+          });
+        }
+      }
+      calendarNotices = [...byId.values()];
+    } else {
+      calendarNotices = calendarNoticesRaw.map((item) => ({
+        ...item,
+        favoriteSource: resolveFavoriteSource(item.notice.id),
+      }));
+    }
 
     const noticeCalendar = buildNoticeCalendar(calendarNotices, now);
 
+    const otherDeptFavorites: DashboardOtherDeptFavoriteItem[] =
+      otherDeptNoticeItems
+        .map(({ notice, siteName }) => {
+          const meta = otherDeptMetaById.get(notice.id);
+          if (!meta) return null;
+          return {
+            notice,
+            siteName,
+            department: meta.department,
+            favoritedBy: meta.users,
+            latestFavoritedAt: meta.latestFavoritedAt,
+          };
+        })
+        .filter(
+          (item): item is DashboardOtherDeptFavoriteItem => item != null,
+        )
+        .sort((a, b) => {
+          const aTime = a.latestFavoritedAt
+            ? new Date(a.latestFavoritedAt).getTime()
+            : 0;
+          const bTime = b.latestFavoritedAt
+            ? new Date(b.latestFavoritedAt).getTime()
+            : 0;
+          return bTime - aTime;
+        })
+        .slice(0, 20);
 
 
-    const deadlineSchedule: DashboardScheduleEntry[] = [
 
-      ...favorites.map(({ notice, siteName }) => ({ notice, siteName })),
+    const deadlineCandidates =
+      scope === "favorites"
+        ? [
+            ...favorites.map(({ notice, siteName }) => ({ notice, siteName })),
+            ...otherDeptNoticeItems.filter(
+              ({ notice }) => !favoriteIds.has(notice.id),
+            ),
+          ]
+        : [
+            ...favorites.map(({ notice, siteName }) => ({ notice, siteName })),
+            ...activeNotices.filter(({ notice }) => !favoriteIds.has(notice.id)),
+          ];
 
-      ...activeNotices.filter(({ notice }) => !favoriteIds.has(notice.id)),
-
-    ]
+    const deadlineSchedule: DashboardScheduleEntry[] = deadlineCandidates
 
       .map(({ notice, siteName }) => {
 
@@ -840,15 +994,21 @@ export async function getDashboardData(options: {
 
 
 
-    const estimateNoticeIds = new Set([
-
-      ...siteEstimateIds,
-
-      ...siteOrderReportIds,
-
-      ...favoriteIds,
-
-    ]);
+    const estimateNoticeIds =
+      scope === "favorites"
+        ? new Set(
+            [...favoriteIds].filter(
+              (id) =>
+                siteEstimateIds.has(id) ||
+                siteOrderReportIds.has(id) ||
+                favoriteIds.has(id),
+            ),
+          )
+        : new Set([
+            ...siteEstimateIds,
+            ...siteOrderReportIds,
+            ...favoriteIds,
+          ]);
 
 
 
@@ -856,9 +1016,15 @@ export async function getDashboardData(options: {
 
       .map((noticeId) => {
 
-        const found = allSiteNotices.find(({ notice }) => notice.id === noticeId);
+        const found =
+          allSiteNotices.find(({ notice }) => notice.id === noticeId) ??
+          favorites.find(({ notice }) => notice.id === noticeId);
 
         if (!found) return null;
+
+        if (scope === "favorites" && !favoriteIds.has(noticeId)) {
+          return null;
+        }
 
         const estimate = estimateSubmissions.find((s) => s.noticeId === noticeId);
 
@@ -894,13 +1060,45 @@ export async function getDashboardData(options: {
 
 
 
-    const orgActivity = buildOrgActivity(
+    let monthlyNotices = monthlyCount ?? 0;
+    if (scope === "favorites") {
+      if (favoriteIds.size === 0) {
+        monthlyNotices = 0;
+      } else {
+        const { count: favMonthlyCount, error: favMonthlyError } = await supabase
+          .from(noticeTable)
+          .select("id", { count: "exact", head: true })
+          .eq("site_id", options.siteId)
+          .eq("is_deleted", false)
+          .in("id", [...favoriteIds])
+          .gte(dateColumn, monthStart)
+          .lt(dateColumn, monthEnd);
 
-      activeNotices.map(({ notice }) => notice),
+        if (favMonthlyError) {
+          return {
+            favorites: [],
+            approachingCounts: emptyCounts(),
+            kpis: emptyKpis(),
+            noticeCalendar: emptyNoticeCalendar(),
+            deadlineSchedule: [],
+            estimates: [],
+            otherDeptFavorites: [],
+            error: favMonthlyError.message,
+          };
+        }
+        monthlyNotices = favMonthlyCount ?? 0;
+      }
+    }
 
-      siteBidIds,
+    const submittedCount =
+      scope === "favorites"
+        ? [...siteBidIds].filter((id) => favoriteIds.has(id)).length
+        : siteBidIds.size;
 
-    );
+    const estimateCount =
+      scope === "favorites"
+        ? [...siteEstimateIds].filter((id) => favoriteIds.has(id)).length
+        : siteEstimateIds.size;
 
 
 
@@ -912,15 +1110,15 @@ export async function getDashboardData(options: {
 
       kpis: {
 
-        monthlyNotices: monthlyCount ?? 0,
+        monthlyNotices,
 
         reviewingCount,
 
         urgentDeadlineCount,
 
-        submittedCount: siteBidIds.size,
+        submittedCount,
 
-        estimateCount: siteEstimateIds.size,
+        estimateCount,
 
       },
 
@@ -930,7 +1128,7 @@ export async function getDashboardData(options: {
 
       estimates,
 
-      orgActivity,
+      otherDeptFavorites,
 
       error: null,
 
@@ -956,7 +1154,7 @@ export async function getDashboardData(options: {
 
       estimates: [],
 
-      orgActivity: [],
+      otherDeptFavorites: [],
 
       error: message,
 

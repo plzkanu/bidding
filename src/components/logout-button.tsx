@@ -9,9 +9,31 @@ export function LogoutButton({ className }: { className?: string }) {
 
   async function handleLogout() {
     setIsLoading(true);
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
+    try {
+      let sessionId: string | null = null;
+      try {
+        sessionId = sessionStorage.getItem("bidding_usage_session_id");
+      } catch {
+        // ignore
+      }
+      if (sessionId) {
+        await fetch("/api/usage/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "end", sessionId }),
+          keepalive: true,
+        });
+        try {
+          sessionStorage.removeItem("bidding_usage_session_id");
+        } catch {
+          // ignore
+        }
+      }
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
   }
 
   return (

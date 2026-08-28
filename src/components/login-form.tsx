@@ -11,6 +11,7 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const idleLogout = searchParams.get("reason") === "idle";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -73,6 +74,11 @@ export function LoginForm() {
           <p className="mt-2 text-sm text-slate-500">
             시스템 이용을 위해 로그인해 주세요.
           </p>
+          {idleLogout ? (
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              미사용 시간이 초과되어 로그아웃되었습니다. 다시 로그인해 주세요.
+            </p>
+          ) : null}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">

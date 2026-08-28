@@ -10,9 +10,10 @@ import type {
   DashboardEstimateEntry,
   DashboardKpis,
   DashboardNoticeCalendar as DashboardNoticeCalendarData,
-  DashboardOrgActivity,
+  DashboardOtherDeptFavoriteItem,
   DashboardScheduleEntry,
   DashboardNoticeStatus,
+  DashboardScope,
 } from "@/lib/bid-notices/dashboard";
 import type { KhnpBidNoticeRow } from "@/lib/bid-notices/types";
 import type { BidNoticeScreeningStatus } from "@/lib/bid-notices/screening";
@@ -23,6 +24,9 @@ import {
 import type { CrawlSite } from "@/lib/crawl-sites";
 
 const SITE_STORAGE_KEY = "bid-notice-site-id";
+const SCOPE_STORAGE_KEY = "dashboard-scope";
+
+type ScopeOption = DashboardScope;
 
 const STATUS_BADGE: Record<
   DashboardNoticeStatus,
@@ -33,8 +37,6 @@ const STATUS_BADGE: Record<
   submitted: { label: "제출 완료", className: "bg-[#E6F7F0] text-[#1E8A5A]" },
   missed: { label: "미참여", className: "bg-[#E8EAED] text-[#6B7280]" },
 };
-
-const BAR_COLORS = ["bg-[#1E5FD4]", "bg-[#1E8A5A]", "bg-[#C8922A]", "bg-[#1E5FD4]", "bg-[#BCC0C8]"];
 
 function resolveInitialSiteId(
   sites: CrawlSite[],
@@ -81,15 +83,24 @@ function formatScheduleDate(iso: string): {
   return { month, day, dow, urgent };
 }
 
+function scopeToggleButtonClass(isActive: boolean) {
+  return isActive
+    ? "bg-white text-[#0F2645] font-semibold shadow-[0_2px_8px_rgba(15,38,69,0.16)] ring-1 ring-[#D1D5DB]"
+    : "text-[#6B7280] hover:bg-white/60 hover:text-[#0F2645]";
+}
+
 export function DashboardHome() {
   const [sites, setSites] = useState<CrawlSite[]>([]);
   const [siteId, setSiteId] = useState<number | null>(null);
+  const [scope, setScope] = useState<ScopeOption>("favorites");
   const [kpis, setKpis] = useState<DashboardKpis | null>(null);
   const [noticeCalendar, setNoticeCalendar] =
     useState<DashboardNoticeCalendarData | null>(null);
   const [deadlineSchedule, setDeadlineSchedule] = useState<DashboardScheduleEntry[]>([]);
   const [estimates, setEstimates] = useState<DashboardEstimateEntry[]>([]);
-  const [orgActivity, setOrgActivity] = useState<DashboardOrgActivity[]>([]);
+  const [otherDeptFavorites, setOtherDeptFavorites] = useState<
+    DashboardOtherDeptFavoriteItem[]
+  >([]);
   const [approachingCounts, setApproachingCounts] =
     useState<ApproachingDeadlineCounts | null>(null);
   const [isLoadingSites, setIsLoadingSites] = useState(true);
@@ -107,6 +118,7 @@ export function DashboardHome() {
 
   const selectedSite = sites.find((s) => s.id === siteId);
   const todayLabel = formatPageDate(new Date());
+  const scopeLabel = scope === "favorites" ? "관심공고" : "전체";
 
   const loadSites = useCallback(async () => {
     setIsLoadingSites(true);
@@ -134,6 +146,12 @@ export function DashboardHome() {
           return resolveInitialSiteId(activeSites, stored);
         });
       }
+      if (typeof window !== "undefined") {
+        const storedScope = localStorage.getItem(SCOPE_STORAGE_KEY);
+        if (storedScope === "favorites" || storedScope === "all") {
+          setScope(storedScope);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
     } finally {
@@ -147,7 +165,7 @@ export function DashboardHome() {
       setNoticeCalendar(null);
       setDeadlineSchedule([]);
       setEstimates([]);
-      setOrgActivity([]);
+      setOtherDeptFavorites([]);
       setApproachingCounts(null);
       return;
     }
@@ -155,13 +173,15 @@ export function DashboardHome() {
     setIsLoadingData(true);
     setError("");
     try {
-      const response = await fetch(`/api/dashboard?siteId=${siteId}`);
+      const response = await fetch(
+        `/api/dashboard?siteId=${siteId}&scope=${scope}`,
+      );
       const data = (await response.json()) as {
         kpis?: DashboardKpis;
         noticeCalendar?: DashboardNoticeCalendarData;
         deadlineSchedule?: DashboardScheduleEntry[];
         estimates?: DashboardEstimateEntry[];
-        orgActivity?: DashboardOrgActivity[];
+        otherDeptFavorites?: DashboardOtherDeptFavoriteItem[];
         approachingCounts?: ApproachingDeadlineCounts;
         error?: string;
       };
@@ -172,7 +192,7 @@ export function DashboardHome() {
       setNoticeCalendar(data.noticeCalendar ?? null);
       setDeadlineSchedule(data.deadlineSchedule ?? []);
       setEstimates(data.estimates ?? []);
-      setOrgActivity(data.orgActivity ?? []);
+      setOtherDeptFavorites(data.otherDeptFavorites ?? []);
       setApproachingCounts(data.approachingCounts ?? null);
       setFavoriteOverrides({});
     } catch (err) {
@@ -180,7 +200,7 @@ export function DashboardHome() {
     } finally {
       setIsLoadingData(false);
     }
-  }, [siteId]);
+  }, [siteId, scope]);
 
   useEffect(() => {
     loadSites();
@@ -193,6 +213,11 @@ export function DashboardHome() {
   function handleSiteChange(id: number) {
     setSiteId(id);
     localStorage.setItem(SITE_STORAGE_KEY, String(id));
+  }
+
+  function handleScopeChange(next: ScopeOption) {
+    setScope(next);
+    localStorage.setItem(SCOPE_STORAGE_KEY, next);
   }
 
   async function openDetail(noticeId: string) {
@@ -288,24 +313,46 @@ export function DashboardHome() {
   }
 
   const isBusy = isLoadingSites || isLoadingData;
-  const maxOrgParticipate = Math.max(
-    ...orgActivity.map((item) => item.participateCount),
-    1,
-  );
 
   return (
     <div className="-m-7 flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 border-b border-[#E8EAED] bg-white px-7 py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="shrink-0">
-            <h1 className="text-base font-bold text-[#0F2645]">대시보드</h1>
-            <p className="text-xs text-[#6B7280]">{todayLabel}</p>
+          <div className="flex min-w-0 items-center justify-between gap-4">
+            <div className="shrink-0">
+              <h1 className="text-base font-bold text-[#0F2645]">대시보드</h1>
+              <p className="text-xs text-[#6B7280]">{todayLabel}</p>
+            </div>
+            <div
+              className="inline-flex shrink-0 rounded-lg border border-[#D1D5DB] bg-[#E8EAED] p-1 shadow-inner"
+              role="group"
+              aria-label="대시보드 표시 범위"
+            >
+              <button
+                type="button"
+                onClick={() => handleScopeChange("all")}
+                aria-pressed={scope === "all"}
+                className={`rounded-md px-3.5 py-2 text-xs transition ${scopeToggleButtonClass(scope === "all")}`}
+              >
+                전체
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScopeChange("favorites")}
+                aria-pressed={scope === "favorites"}
+                className={`rounded-md px-3.5 py-2 text-xs transition ${scopeToggleButtonClass(scope === "favorites")}`}
+              >
+                관심공고만
+              </button>
+            </div>
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             <CrawlSiteSelector
               sites={sites}
               selectedSiteId={siteId}
-              onSelect={handleSiteChange}
+              onSelect={(id) => {
+                if (id != null) handleSiteChange(id);
+              }}
               isLoading={isLoadingSites}
               variant="compact"
             />
@@ -338,9 +385,15 @@ export function DashboardHome() {
 
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
-            label="이번 달 수집 공고"
+            label={
+              scope === "favorites" ? "이번 달 관심 공고" : "이번 달 수집 공고"
+            }
             value={kpis?.monthlyNotices ?? 0}
-            sub={selectedSite ? `${selectedSite.site_name} 기준` : "사이트 선택 필요"}
+            sub={
+              selectedSite
+                ? `${selectedSite.site_name} · ${scopeLabel}`
+                : "사이트 선택 필요"
+            }
             icon="📢"
             iconClass="bg-[#E8F0FE]"
           />
@@ -353,6 +406,7 @@ export function DashboardHome() {
                 <span className="font-semibold text-[#D94040]">
                   {(kpis?.urgentDeadlineCount ?? 0).toLocaleString("ko-KR")}건
                 </span>
+                <span className="text-[#6B7280]"> · {scopeLabel}</span>
               </>
             }
             icon="🔍"
@@ -361,12 +415,14 @@ export function DashboardHome() {
           <KpiCard
             label="제출 완료"
             value={kpis?.submittedCount ?? 0}
-            sub={`견적 등록 ${(kpis?.estimateCount ?? 0).toLocaleString("ko-KR")}건`}
+            sub={`견적 등록 ${(kpis?.estimateCount ?? 0).toLocaleString("ko-KR")}건 · ${scopeLabel}`}
             icon="✅"
             iconClass="bg-[#E6F7F0]"
           />
           <KpiCard
-            label="마감 임박 (관심공고)"
+            label={
+              scope === "favorites" ? "마감 임박 (관심공고)" : "마감 임박"
+            }
             value={
               approachingCounts
                 ? Object.values(approachingCounts.week).reduce((a, b) => a + b, 0)
@@ -392,13 +448,20 @@ export function DashboardHome() {
               calendar={noticeCalendar}
               siteId={siteId}
               isLoading={isBusy}
+              showFavoriteLegend={scope === "favorites"}
             />
           </DashboardCard>
 
           <DashboardCard
             title="입찰 마감 일정"
-            actionHref="/dashboard/favorites"
-            actionLabel="관심공고 →"
+            actionHref={
+              scope === "favorites"
+                ? "/dashboard/favorites"
+                : siteId != null
+                  ? `/dashboard/announcements?siteId=${siteId}`
+                  : "/dashboard/announcements"
+            }
+            actionLabel={scope === "favorites" ? "관심공고 →" : "공고 조회 →"}
           >
             <div className="px-5 py-1">
               {isBusy ? (
@@ -477,14 +540,18 @@ export function DashboardHome() {
                     key={item.notice.id}
                     type="button"
                     onClick={() => openDetail(item.notice.id)}
-                    className="grid w-full grid-cols-[1fr_4rem_5rem] items-center gap-2.5 border-b border-[#E8EAED] px-5 py-2.5 text-left last:border-b-0 hover:bg-[#F5F6F8]"
+                    title="클릭하면 상세정보를 볼 수 있습니다"
+                    className="group grid w-full grid-cols-[1fr_4rem_5rem] items-center gap-2.5 border-b border-[#E8EAED] px-5 py-2.5 text-left last:border-b-0 transition-colors hover:bg-[#E8F0FE] hover:shadow-[inset_3px_0_0_0_#1E5FD4]"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-[13px] font-medium text-[#1A1E2C]">
+                      <p className="truncate text-[13px] font-medium text-[#1A1E2C] transition-colors group-hover:text-[#1E5FD4] group-hover:underline">
                         {item.notice.title}
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-[#6B7280]">
                         {item.siteName ?? "-"}
+                        <span className="ml-1.5 hidden text-[#1E5FD4] group-hover:inline">
+                          · 상세 보기
+                        </span>
                       </p>
                     </div>
                     <span className="text-[12px] text-[#6B7280]">
@@ -502,49 +569,59 @@ export function DashboardHome() {
           </DashboardCard>
 
           <DashboardCard
-            title="발주처별 참여 현황"
-            actionHref="/dashboard/results"
-            actionLabel="상세 조회 →"
+            title="타부서 관심공고"
+            actionHref="/dashboard/favorites"
+            actionLabel="관심공고 →"
           >
-            <div className="space-y-3.5 px-5 py-4">
-              {isBusy ? (
-                <EmptyState message="불러오는 중…" />
-              ) : orgActivity.length === 0 ? (
-                <EmptyState message="활동 데이터가 없습니다." />
-              ) : (
-                orgActivity.map((item, index) => {
-                  const rate =
-                    item.participateCount > 0
-                      ? Math.round((item.bidCount / item.participateCount) * 100)
-                      : 0;
-                  const width = Math.round(
-                    (item.participateCount / maxOrgParticipate) * 100,
-                  );
-                  return (
-                    <div key={item.label}>
-                      <div className="mb-1.5 flex justify-between">
-                        <span className="text-[12px] font-medium text-[#1A1E2C]">
-                          {item.label}
+            <div className="grid grid-cols-[1fr_5.5rem] gap-2.5 border-b border-[#E8EAED] bg-[#F5F6F8] px-5 py-2 text-[11px] font-medium text-[#6B7280]">
+              <span>공고명 / 부서 · 등록자</span>
+              <span>등록일</span>
+            </div>
+            {isBusy ? (
+              <EmptyState message="불러오는 중…" />
+            ) : otherDeptFavorites.length === 0 ? (
+              <EmptyState message="타부서 관심공고가 없습니다." />
+            ) : (
+              otherDeptFavorites.map((item) => {
+                const people = item.favoritedBy
+                  .map((user) => user.name)
+                  .slice(0, 3)
+                  .join(", ");
+                const extra =
+                  item.favoritedBy.length > 3
+                    ? ` 외 ${item.favoritedBy.length - 3}명`
+                    : "";
+                return (
+                  <button
+                    key={item.notice.id}
+                    type="button"
+                    onClick={() => openDetail(item.notice.id)}
+                    title="클릭하면 상세정보를 볼 수 있습니다"
+                    className="group grid w-full grid-cols-[1fr_5.5rem] items-center gap-2.5 border-b border-[#E8EAED] px-5 py-2.5 text-left last:border-b-0 transition-colors hover:bg-[#E8F0FE] hover:shadow-[inset_3px_0_0_0_#1E5FD4]"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-medium text-[#1A1E2C] transition-colors group-hover:text-[#1E5FD4] group-hover:underline">
+                        {item.notice.title}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-[#6B7280]">
+                        <span className="font-medium text-[#C8922A]">
+                          {item.department || "부서 미기재"}
                         </span>
-                        <span className="text-[12px] font-bold text-[#0F2645]">
-                          {rate}%
+                        {people ? ` · ${people}${extra}` : ""}
+                        <span className="ml-1.5 hidden text-[#1E5FD4] group-hover:inline">
+                          · 상세 보기
                         </span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-[#E8EAED]">
-                        <div
-                          className={`h-full rounded-full ${BAR_COLORS[index % BAR_COLORS.length]}`}
-                          style={{ width: `${width}%` }}
-                        />
-                      </div>
-                      <p className="mt-1 text-[11px] text-[#6B7280]">
-                        공고 {item.participateCount.toLocaleString("ko-KR")}건 · 입찰{" "}
-                        {item.bidCount.toLocaleString("ko-KR")}건
                       </p>
                     </div>
-                  );
-                })
-              )}
-            </div>
+                    <span className="text-[12px] text-[#6B7280]">
+                      {item.latestFavoritedAt
+                        ? formatListDate(item.latestFavoritedAt)
+                        : "-"}
+                    </span>
+                  </button>
+                );
+              })
+            )}
           </DashboardCard>
         </div>
       </div>

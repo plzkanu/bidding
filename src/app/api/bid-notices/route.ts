@@ -46,6 +46,8 @@ export async function GET(request: Request) {
   const favoritesOnly = searchParams.get("favoritesOnly") === "true";
   const keywordScreeningOnly =
     searchParams.get("keywordScreeningOnly") === "true";
+  const purchaseTypeRaw = searchParams.get("purchaseType")?.trim() ?? "";
+  const purchaseType = purchaseTypeRaw || undefined;
   const noticeDateYesterday =
     searchParams.get("noticeDateYesterday") === "true";
   const noticeDateRaw = searchParams.get("noticeDate")?.trim() ?? "";
@@ -68,10 +70,12 @@ export async function GET(request: Request) {
     );
   }
 
-  const siteId = siteIdRaw ? Number(siteIdRaw) : NaN;
-  if (!siteIdRaw || Number.isNaN(siteId)) {
+  const allSites =
+    !siteIdRaw || siteIdRaw === "all" || siteIdRaw === "ALL";
+  const siteId = allSites ? null : Number(siteIdRaw);
+  if (!allSites && Number.isNaN(siteId)) {
     return NextResponse.json(
-      { error: "siteId는 필수입니다." },
+      { error: "siteId는 숫자이거나 all 이어야 합니다." },
       { status: 400 },
     );
   }
@@ -83,14 +87,16 @@ export async function GET(request: Request) {
     );
   }
 
-  const dataset = await resolveBidNoticeDatasetForSiteId(siteId);
-  if (!isNoticeTypeValidForDataset(dataset, noticeType)) {
-    return NextResponse.json(
-      {
-        error: getNoticeTypeValidationMessage(dataset),
-      },
-      { status: 400 },
-    );
+  if (!allSites && siteId != null) {
+    const dataset = await resolveBidNoticeDatasetForSiteId(siteId);
+    if (!isNoticeTypeValidForDataset(dataset, noticeType)) {
+      return NextResponse.json(
+        {
+          error: getNoticeTypeValidationMessage(dataset),
+        },
+        { status: 400 },
+      );
+    }
   }
 
   if (noticeDateRaw && !isValidNoticeDateYmd(noticeDateRaw)) {
@@ -100,7 +106,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const { notices, total, error } = await listBidNotices({
+  const { notices, total, purchaseTypes, error } = await listBidNotices({
     siteId,
     noticeType,
     page: Number.isFinite(page) ? page : 1,
@@ -113,13 +119,20 @@ export async function GET(request: Request) {
     noticeDateYesterday: noticeDateRaw ? false : noticeDateYesterday,
     noticeDate: noticeDateRaw || undefined,
     keywordScreeningOnly,
+    purchaseType,
   });
 
   if (error) {
     return NextResponse.json({ error }, { status: 500 });
   }
 
-  return NextResponse.json({ notices, total, page, pageSize });
+  return NextResponse.json({
+    notices,
+    total,
+    page,
+    pageSize,
+    purchaseTypes: purchaseTypes ?? [],
+  });
 }
 
 export async function POST(request: Request) {

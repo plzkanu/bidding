@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
-import { getDashboardData } from "@/lib/bid-notices/dashboard";
+import {
+  getDashboardData,
+  type DashboardScope,
+} from "@/lib/bid-notices/dashboard";
 import {
   getSupabaseConfigError,
   isSupabaseConfigured,
@@ -11,6 +14,10 @@ function supabaseNotConfiguredResponse() {
     { error: getSupabaseConfigError() ?? "Supabase가 설정되지 않았습니다." },
     { status: 503 },
   );
+}
+
+function parseScope(raw: string | null): DashboardScope {
+  return raw === "favorites" ? "favorites" : "all";
 }
 
 export async function GET(request: Request) {
@@ -25,6 +32,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteIdRaw = searchParams.get("siteId");
   const siteId = siteIdRaw ? Number(siteIdRaw) : NaN;
+  const scope = parseScope(searchParams.get("scope"));
 
   if (!siteIdRaw || Number.isNaN(siteId)) {
     return NextResponse.json(
@@ -40,11 +48,13 @@ export async function GET(request: Request) {
     noticeCalendar,
     deadlineSchedule,
     estimates,
-    orgActivity,
+    otherDeptFavorites,
     error,
   } = await getDashboardData({
     userId: session.id,
+    department: session.department ?? "",
     siteId,
+    scope,
   });
 
   if (error) {
@@ -58,6 +68,7 @@ export async function GET(request: Request) {
     noticeCalendar,
     deadlineSchedule,
     estimates,
-    orgActivity,
+    otherDeptFavorites,
+    scope,
   });
 }

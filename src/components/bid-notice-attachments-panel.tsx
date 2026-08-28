@@ -40,6 +40,7 @@ export function BidNoticeAttachmentsPanel({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [canUpload, setCanUpload] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -70,7 +71,9 @@ export function BidNoticeAttachmentsPanel({
       }
 
       setAttachments(attachmentsData.attachments ?? []);
-      setIsAdmin(meRes.ok && meData.user?.role === "admin");
+      const loggedIn = meRes.ok && Boolean(meData.user);
+      setCanUpload(loggedIn);
+      setIsAdmin(loggedIn && meData.user?.role === "admin");
     } catch (err) {
       setAttachments([]);
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
@@ -145,57 +148,43 @@ export function BidNoticeAttachmentsPanel({
     ? ""
     : "mt-6 border-t border-slate-100 pt-6";
 
+  const uploadButton = canUpload ? (
+    <div className={embedded ? "ml-auto flex items-center gap-2" : "flex items-center gap-2"}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleUpload}
+      />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={isUploading}
+        className="rounded-lg border border-[#004b87]/30 px-3 py-1.5 text-xs font-semibold text-[#004b87] hover:bg-[#004b87]/5 disabled:opacity-40"
+      >
+        {isUploading ? "업로드 중…" : "파일 업로드"}
+      </button>
+    </div>
+  ) : null;
+
   return (
     <section className={sectionClass}>
       {!embedded ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-800">첨부파일</h3>
-          {isAdmin ? (
-            <div className="flex items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                onChange={handleUpload}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="rounded-lg border border-[#004b87]/30 px-3 py-1.5 text-xs font-semibold text-[#004b87] hover:bg-[#004b87]/5 disabled:opacity-40"
-              >
-                {isUploading ? "업로드 중…" : "파일 업로드"}
-              </button>
-            </div>
-          ) : null}
+          {uploadButton}
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {isAdmin ? (
-            <div className="ml-auto flex items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                onChange={handleUpload}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="rounded-lg border border-[#004b87]/30 px-3 py-1.5 text-xs font-semibold text-[#004b87] hover:bg-[#004b87]/5 disabled:opacity-40"
-              >
-                {isUploading ? "업로드 중…" : "파일 업로드"}
-              </button>
-            </div>
-          ) : null}
+          {uploadButton}
         </div>
       )}
 
-      {isAdmin ? (
+      {canUpload ? (
         <p className="mt-1 text-xs text-slate-500">
-          관리자만 공고별 첨부파일을 등록·삭제할 수 있습니다. (최대{" "}
+          공고별 첨부파일을 등록할 수 있습니다. (최대{" "}
           {Math.floor(ATTACHMENT_MAX_BYTES / (1024 * 1024))}MB)
+          {isAdmin ? " 삭제는 관리자만 가능합니다." : ""}
         </p>
       ) : (
         <p className="mt-1 text-xs text-slate-500">

@@ -16,6 +16,8 @@ interface DashboardNoticeCalendarProps {
   calendar: DashboardNoticeCalendar | null;
   siteId: number | null;
   isLoading?: boolean;
+  /** 관심공고만 모드일 때 내/타부서 색 구분 표시 */
+  showFavoriteLegend?: boolean;
 }
 
 function parseYmd(ymd: string): { month: number; day: number } {
@@ -52,6 +54,7 @@ export function DashboardNoticeCalendar({
   calendar,
   siteId,
   isLoading = false,
+  showFavoriteLegend = false,
 }: DashboardNoticeCalendarProps) {
   const router = useRouter();
   const todayYmd = getKstTodayYmd();
@@ -92,6 +95,19 @@ export function DashboardNoticeCalendar({
         </span>
       </p>
 
+      {showFavoriteLegend ? (
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-[10px] text-[#6B7280]">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block size-2.5 rounded-full bg-[#1E5FD4]" />
+            내 관심
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block size-2.5 rounded-full bg-[#C8922A]" />
+            타부서 관심
+          </span>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-[#6B7280]">
         {WEEKDAY_LABELS.map((label) => (
           <div key={label} className="py-1">
@@ -112,6 +128,8 @@ export function DashboardNoticeCalendar({
           }
 
           const count = calendar?.countsByDate[cell.ymd] ?? 0;
+          const mineCount = calendar?.mineCountsByDate?.[cell.ymd] ?? 0;
+          const otherCount = calendar?.otherDeptCountsByDate?.[cell.ymd] ?? 0;
           const isToday = cell.ymd === todayYmd;
           const clickable = count > 0 && siteId != null;
           const showMonth = cell.day === 1 || cell.ymd === rangeStart;
@@ -124,7 +142,9 @@ export function DashboardNoticeCalendar({
               onClick={() => handleDayClick(cell.ymd!)}
               title={
                 clickable
-                  ? `${cell.ymd} · ${count}건 · 입찰공고 조회`
+                  ? showFavoriteLegend
+                    ? `${cell.ymd} · 내 ${mineCount} · 타부서 ${otherCount}`
+                    : `${cell.ymd} · ${count}건 · 입찰공고 조회`
                   : `${cell.ymd}`
               }
               className={`flex ${CELL_MIN_HEIGHT} flex-col items-center justify-center rounded-md border px-0.5 py-1 transition-colors ${
@@ -150,9 +170,24 @@ export function DashboardNoticeCalendar({
                 {cell.day}
               </span>
               {count > 0 ? (
-                <span className="mt-1 min-w-[1.25rem] rounded-full bg-[#1E5FD4] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-                  {count}
-                </span>
+                showFavoriteLegend ? (
+                  <span className="mt-1 flex items-center justify-center gap-0.5">
+                    {mineCount > 0 ? (
+                      <span className="min-w-[1.1rem] rounded-full bg-[#1E5FD4] px-1 py-0.5 text-[9px] font-bold leading-none text-white">
+                        {mineCount}
+                      </span>
+                    ) : null}
+                    {otherCount > 0 ? (
+                      <span className="min-w-[1.1rem] rounded-full bg-[#C8922A] px-1 py-0.5 text-[9px] font-bold leading-none text-white">
+                        {otherCount}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  <span className="mt-1 min-w-[1.25rem] rounded-full bg-[#1E5FD4] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {count}
+                  </span>
+                )
               ) : (
                 <span className="mt-1 text-[10px] leading-none text-[#BCC0C8]">
                   -

@@ -21,6 +21,18 @@ const adminMenus = [
     title: "자동선별 키워드",
     description: "입찰공고 조회 자동선별에 사용할 키워드를 등록·관리합니다.",
   },
+  {
+    href: "/dashboard/admin/usage",
+    title: "사용 현황",
+    description:
+      "계정별 최종 접속시각, 사용시간, 화면별 방문 횟수를 조회합니다.",
+  },
+  {
+    href: "/dashboard/admin/session-settings",
+    title: "세션 설정",
+    description:
+      "미사용 타임아웃 시간을 지정하고, 연장·자동 로그아웃 동작을 관리합니다.",
+  },
 ];
 
 export default function AdminMenuPage() {

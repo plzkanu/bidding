@@ -227,3 +227,189 @@ export async function removeNoticeFavorite(
     return { error: normalizeFavoritesError(message) };
   }
 }
+
+export interface OtherDepartmentFavoriteRow {
+  noticeId: string;
+  department: string;
+  users: Array<{ userId: string; name: string }>;
+  latestFavoritedAt: string | null;
+}
+
+/**
+ * 현재 사용자와 다른 부서 소속 사용자가 등록한 관심공고를 집계합니다.
+ * 동일 공고를 여러 타부서·사용자가 등록한 경우 하나로 묶습니다.
+ */
+export async function getOtherDepartmentFavoriteRows(options: {
+  currentUserId: string;
+  currentDepartment: string;
+  siteId?: number;
+}): Promise<{
+  rows: OtherDepartmentFavoriteRow[];
+  noticeIds: string[];
+  error: string | null;
+}> {
+  const configError = supabaseNotReadyError();
+  if (configError) {
+    return { rows: [], noticeIds: [], error: configError };
+  }
+
+  try {
+    const supabase = createServerClient();
+    const myDept = options.currentDepartment.trim().toLowerCase();
+
+    const { data: users, error: usersError } = await supabase
+      .from("bid_users")
+      .select("id, name, department, active")
+      .eq("active", true);
+
+    if (usersError) {
+      return {
+        rows: [],
+        noticeIds: [],
+        error: normalizeFavoritesError(usersError.message),
+      };
+    }
+
+    const otherDeptUsers = (users ?? []).filter((row) => {
+      const id = String(row.id);
+      if (id === options.currentUserId) return false;
+      const dept = String(row.department ?? "").trim();
+      if (!dept) return false;
+      if (!myDept) return true;
+      return dept.toLowerCase() !== myDept;
+    });
+
+    if (otherDeptUsers.length === 0) {
+      return { rows: [], noticeIds: [], error: null };
+    }
+
+    const userMap = new Map(
+      otherDeptUsers.map((row) => [
+        String(row.id),
+        {
+          name: String(row.name ?? row.id),
+          department: String(row.department ?? "").trim(),
+        },
+      ]),
+    );
+    const otherUserIds = [...userMap.keys()];
+
+    const { data: favRows, error: favError } = await supabase
+      .from("user_bid_favorites")
+      .select("user_id, notice_id, created_at")
+      .in("user_id", otherUserIds);
+
+    if (favError) {
+      return {
+        rows: [],
+        noticeIds: [],
+        error: normalizeFavoritesError(favError.message),
+      };
+    }
+
+    const rawNoticeIds = [
+      ...new Set((favRows ?? []).map((row) => row.notice_id as string)),
+    ];
+    const { noticeIds: filteredIds, error: filterError } =
+      await filterFavoriteNoticeIds(rawNoticeIds, {
+        siteId: options.siteId,
+      });
+    if (filterError) {
+      return { rows: [], noticeIds: [], error: filterError };
+    }
+
+    const allowed = new Set(filteredIds);
+    const byNotice = new Map<
+      string,
+      {
+        department: string;
+        users: Map<string, string>;
+        latestFavoritedAt: string | null;
+      }
+    >();
+
+    for (const row of favRows ?? []) {
+      const noticeId = row.notice_id as string;
+      if (!allowed.has(noticeId)) continue;
+      const userId = String(row.user_id);
+      const user = userMap.get(userId);
+      if (!user) continue;
+
+      const current = byNotice.get(noticeId) ?? {
+        department: user.department,
+        users: new Map<string, string>(),
+        latestFavoritedAt: null as string | null,
+      };
+      current.users.set(userId, user.name);
+      if (
+        !current.department ||
+        (user.department && current.department !== user.department)
+      ) {
+        // 여러 부서면 첫 부서를 유지하고, 표시는 집계 시 처리
+        if (!current.department) current.department = user.department;
+      }
+      const createdAt = (row.created_at as string | null) ?? null;
+      if (
+        createdAt &&
+        (!current.latestFavoritedAt ||
+          new Date(createdAt) > new Date(current.latestFavoritedAt))
+      ) {
+        current.latestFavoritedAt = createdAt;
+      }
+      byNotice.set(noticeId, current);
+    }
+
+    // 부서별로 묶되, 공고당 여러 부서가 있을 수 있어 부서명 목록을 합침
+    const deptByNotice = new Map<string, Set<string>>();
+    for (const row of favRows ?? []) {
+      const noticeId = row.notice_id as string;
+      if (!allowed.has(noticeId)) continue;
+      const user = userMap.get(String(row.user_id));
+      if (!user?.department) continue;
+      const set = deptByNotice.get(noticeId) ?? new Set<string>();
+      set.add(user.department);
+      deptByNotice.set(noticeId, set);
+    }
+
+    const rows: OtherDepartmentFavoriteRow[] = [...byNotice.entries()]
+      .map(([noticeId, value]) => {
+        const depts = [...(deptByNotice.get(noticeId) ?? [])].sort((a, b) =>
+          a.localeCompare(b, "ko"),
+        );
+        return {
+          noticeId,
+          department: depts.join(", ") || value.department,
+          users: [...value.users.entries()].map(([userId, name]) => ({
+            userId,
+            name,
+          })),
+          latestFavoritedAt: value.latestFavoritedAt,
+        };
+      })
+      .sort((a, b) => {
+        const aTime = a.latestFavoritedAt
+          ? new Date(a.latestFavoritedAt).getTime()
+          : 0;
+        const bTime = b.latestFavoritedAt
+          ? new Date(b.latestFavoritedAt).getTime()
+          : 0;
+        return bTime - aTime;
+      });
+
+    return {
+      rows,
+      noticeIds: rows.map((row) => row.noticeId),
+      error: null,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "타부서 관심공고 조회에 실패했습니다.";
+    return {
+      rows: [],
+      noticeIds: [],
+      error: normalizeFavoritesError(message),
+    };
+  }
+}

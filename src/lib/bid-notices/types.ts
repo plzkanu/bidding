@@ -314,5 +314,7 @@ export interface KhnpBidNoticeRow extends KhnpBidNotice {
 export interface BidNoticeListResult {
   notices: KhnpBidNoticeRow[];
   total: number;
+  /** 입찰공고(BID) 목록의 구분(purchase_type) 선택지 */
+  purchaseTypes?: string[];
   error: string | null;
 }

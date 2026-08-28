@@ -38,4 +38,12 @@ export const adminSubNavItems: NavItem[] = [
     href: "/dashboard/admin/screening-keywords",
     label: "자동선별 키워드",
   },
+  {
+    href: "/dashboard/admin/usage",
+    label: "사용 현황",
+  },
+  {
+    href: "/dashboard/admin/session-settings",
+    label: "세션 설정",
+  },
 ];
