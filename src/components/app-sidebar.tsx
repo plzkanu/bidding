@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { LogoutButton } from "@/components/logout-button";
 import {
   announcementsSubNavItems,
+  bidSubNavItems,
   mainNavItems,
   openingResultsSubNavItems,
 } from "@/lib/nav";
@@ -44,6 +45,15 @@ function isNavActive(pathname: string, href: string) {
     return openingResultsSubNavItems.some(
       (item) =>
         pathname === item.href || pathname.startsWith(`${item.href}/`),
+    );
+  }
+  if (href === "/dashboard/bid") {
+    return (
+      pathname === "/dashboard/bid" ||
+      bidSubNavItems.some(
+        (item) =>
+          pathname === item.href || pathname.startsWith(`${item.href}/`),
+      )
     );
   }
   return pathname === href || pathname.startsWith(`${href}/`);

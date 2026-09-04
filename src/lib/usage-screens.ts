@@ -34,6 +34,11 @@ export const USAGE_SCREENS: ScreenDefinition[] = [
     matchPrefixes: ["/dashboard/order-report"],
   },
   {
+    key: "bid_amount",
+    label: "입찰하기 · 입찰금액 결정",
+    matchPrefixes: ["/dashboard/bid/amount"],
+  },
+  {
     key: "bid",
     label: "입찰하기",
     matchPrefixes: ["/dashboard/bid"],

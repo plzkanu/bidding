@@ -38,7 +38,10 @@ import {
   isValidNoticeDateYmd,
   NOTICE_DATE_YESTERDAY_LABEL,
 } from "@/lib/bid-notices/notice-date";
-import type { BidNoticeScreeningStatus } from "@/lib/bid-notices/screening";
+import {
+  SCREENING_STATUS_LABELS,
+  type BidNoticeScreeningStatus,
+} from "@/lib/bid-notices/screening";
 import type { NoticeActivityEntry } from "@/lib/bid-notices/notice-activity";
 import type { BidNoticeAssignment } from "@/lib/bid-notices/assignments";
 import type { Department } from "@/lib/departments";
@@ -61,6 +64,19 @@ const PAGE_SIZE = 20;
 const EXPORT_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 10_000;
 const SITE_STORAGE_KEY = "bid-notice-inquiry-site-id";
+const BULK_SCREENING_STATUSES: BidNoticeScreeningStatus[] = [
+  "TARGET",
+  "EXCLUDED",
+  "WAITING",
+];
+const BULK_SCREENING_BUTTON_CLASS: Record<BidNoticeScreeningStatus, string> = {
+  WAITING:
+    "border-slate-300 bg-white text-slate-600 hover:bg-slate-50",
+  EXCLUDED:
+    "border-slate-400 bg-slate-100 text-slate-500 hover:bg-slate-200",
+  TARGET:
+    "border-[#004b87]/40 bg-[#004b87]/10 font-semibold text-[#004b87] hover:bg-[#004b87]/15",
+};
 
 const LIST_TABLE_CLASS = "w-full table-fixed text-left text-xs";
 const BID_STATUS_COL_CLASS = "w-[4.5rem] whitespace-nowrap px-2 py-1.5";
@@ -171,6 +187,7 @@ export function BidNoticeInquiry({
   const [isLoadingSites, setIsLoadingSites] = useState(true);
   const [isLoadingNotices, setIsLoadingNotices] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isBulkScreening, setIsBulkScreening] = useState(false);
   const [isTogglingFavorite, setIsTogglingFavorite] = useState<string | null>(
     null,
   );
@@ -734,7 +751,7 @@ export function BidNoticeInquiry({
         }
 
         router.push(
-          `/dashboard/bid?noticeId=${encodeURIComponent(noticeId)}`,
+          `/dashboard/bid/amount?noticeId=${encodeURIComponent(noticeId)}`,
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : "입찰 등록에 실패했습니다.");
@@ -889,8 +906,11 @@ export function BidNoticeInquiry({
 
   function handleSearchSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setSearch(searchInput.trim());
-    setPage(1);
+    const nextSearch = searchInput.trim();
+    setSearch(nextSearch);
+    if (page !== 1) {
+      setPage(1);
+    }
   }
 
   async function fetchAllNoticesForExport(): Promise<KhnpBidNoticeRow[]> {
@@ -970,6 +990,61 @@ export function BidNoticeInquiry({
     }
   }
 
+  async function handleBulkScreening(status: BidNoticeScreeningStatus) {
+    if (!sitesReady || total === 0) return;
+
+    const statusLabel = SCREENING_STATUS_LABELS[status];
+    const confirmed = confirm(
+      `현재 조회된 ${total.toLocaleString("ko-KR")}건을 모두「${statusLabel}」으로 일괄 선별하시겠습니까?\n\n(조회 조건·필터에 맞는 전체 공고에 적용됩니다.)`,
+    );
+    if (!confirmed) return;
+
+    setIsBulkScreening(true);
+    setError("");
+    try {
+      const rows = await fetchAllNoticesForExport();
+      if (rows.length === 0) {
+        throw new Error("선별할 공고가 없습니다.");
+      }
+
+      const response = await fetch("/api/bid-notice-screening/bulk", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          noticeIds: rows.map((row) => row.id),
+          status,
+        }),
+      });
+      const data = (await response.json()) as {
+        updatedCount?: number;
+        status?: BidNoticeScreeningStatus;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error ?? "일괄 선별에 실패했습니다.");
+      }
+
+      const nextStatus = data.status ?? status;
+      const updatedIds = rows.map((row) => row.id);
+      setScreeningStatuses((prev) => {
+        const next = { ...prev };
+        for (const noticeId of updatedIds) {
+          next[noticeId] = nextStatus;
+        }
+        return next;
+      });
+      if (detailNotice && updatedIds.includes(detailNotice.id)) {
+        void refreshDetailActivities(detailNotice.id);
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "일괄 선별에 실패했습니다.",
+      );
+    } finally {
+      setIsBulkScreening(false);
+    }
+  }
+
   async function handleDeleteNotice(noticeId: string) {
     if (
       !confirm(
@@ -1023,52 +1098,76 @@ export function BidNoticeInquiry({
 
       <form
         onSubmit={handleSearchSubmit}
-        className="mt-4 flex flex-col gap-2 sm:flex-row sm:max-w-2xl"
+        className="mt-4 flex flex-wrap items-center gap-2"
       >
-          <input
-            type="search"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="공고번호·공고명·부서 검색"
-            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
-          />
-          <button
-            type="submit"
-            className="shrink-0 rounded-lg bg-[#004b87] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003d6e]"
-          >
-            검색
-          </button>
-          <button
-            type="button"
-            onClick={() => loadNotices()}
-            disabled={isLoadingNotices || !sitesReady}
-            className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-          >
-            새로고침
-          </button>
-          <button
-            type="button"
-            onClick={() => setManualFormMode("create")}
-            disabled={
-              siteId == null || !supportsManualBidNoticeEntry(siteDataset)
-            }
-            className="shrink-0 rounded-lg bg-[#a4ce39] px-4 py-2 text-sm font-semibold text-[#004b87] hover:bg-[#95bd33] disabled:opacity-40"
-          >
-            공고 직접 등록
-          </button>
-          <button
-            type="button"
-            onClick={() => handleExcelExport()}
-            disabled={
-              isExporting ||
-              isLoadingNotices ||
-              !sitesReady ||
-              total === 0
-            }
-            className="shrink-0 rounded-lg border border-[#009ada] px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#009ada]/5 disabled:opacity-40"
-          >
-            {isExporting ? "다운로드 중…" : "엑셀 다운로드"}
-          </button>
+        <input
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="공고번호·공고명·부서 검색"
+          className="flex-none w-[14rem] rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+        />
+        <button
+          type="submit"
+          className="shrink-0 rounded-lg bg-[#004b87] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003d6e]"
+        >
+          검색
+        </button>
+        <button
+          type="button"
+          onClick={() => loadNotices()}
+          disabled={isLoadingNotices || !sitesReady}
+          className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          새로고침
+        </button>
+        <button
+          type="button"
+          onClick={() => setManualFormMode("create")}
+          disabled={
+            siteId == null || !supportsManualBidNoticeEntry(siteDataset)
+          }
+          className="shrink-0 rounded-lg bg-[#a4ce39] px-4 py-2 text-sm font-semibold text-[#004b87] hover:bg-[#95bd33] disabled:opacity-40"
+        >
+          공고 직접 등록
+        </button>
+        <div
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5"
+          title="조회된 전체 공고에 선별 상태를 일괄 적용합니다"
+        >
+          <span className="text-xs font-medium text-slate-600">
+            {isBulkScreening ? "선별 중…" : "일괄 선별"}
+          </span>
+          {BULK_SCREENING_STATUSES.map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => handleBulkScreening(status)}
+              disabled={
+                isBulkScreening ||
+                isLoadingNotices ||
+                !sitesReady ||
+                total === 0
+              }
+              className={`rounded border px-2 py-1 text-xs font-medium disabled:opacity-40 ${BULK_SCREENING_BUTTON_CLASS[status]}`}
+            >
+              {SCREENING_STATUS_LABELS[status]}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => handleExcelExport()}
+          disabled={
+            isExporting ||
+            isLoadingNotices ||
+            !sitesReady ||
+            total === 0
+          }
+          className="shrink-0 rounded-lg border border-[#009ada] px-4 py-2 text-sm font-medium text-[#004b87] hover:bg-[#009ada]/5 disabled:opacity-40"
+        >
+          {isExporting ? "다운로드 중…" : "엑셀 다운로드"}
+        </button>
       </form>
 
       <div className="mt-4 space-y-3">
@@ -1369,7 +1468,7 @@ export function BidNoticeInquiry({
                     onSubmitBid={() => {
                       if (submissionIds.has(row.id)) {
                         router.push(
-                          `/dashboard/bid?noticeId=${encodeURIComponent(row.id)}`,
+                          `/dashboard/bid/amount?noticeId=${encodeURIComponent(row.id)}`,
                         );
                         return;
                       }
@@ -1453,7 +1552,7 @@ export function BidNoticeInquiry({
           onSubmitBid={() => {
             if (detailIsSubmitted) {
               router.push(
-                `/dashboard/bid?noticeId=${encodeURIComponent(detailNotice.id)}`,
+                `/dashboard/bid/amount?noticeId=${encodeURIComponent(detailNotice.id)}`,
               );
               return;
             }

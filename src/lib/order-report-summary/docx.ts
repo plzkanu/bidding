@@ -57,6 +57,7 @@ import {
 } from "@/lib/order-report-summary/overview-display";
 import { normalizeScheduleFlowSteps, getEffectiveScheduleSteps } from "@/lib/order-report-summary/schedule-flow";
 import { sanitizeMultilineSummaryText } from "@/lib/order-report-summary/text-sanitize";
+import { splitQualificationItems } from "@/lib/order-report-summary/qualification-format";
 import { EMPTY_SUMMARY_VALUE } from "@/lib/order-report-summary/types";
 
 
@@ -783,6 +784,13 @@ function buildScheduleArrowCell(width: number): TableCell {
 
 
 
+function qualificationCriteriaForDocx(criteria: string): string {
+  const items = splitQualificationItems(criteria);
+  return items.length > 0
+    ? items.map((item) => `· ${item}`).join("\n")
+    : criteria;
+}
+
 function buildQualificationTable(
   rows: OrderReportSummaryQualificationRow[],
 ): Table {
@@ -839,7 +847,9 @@ function buildQualificationTable(
             borders: CELL_BORDER,
             shading: clearShading(COLOR_WHITE),
             verticalAlign: VerticalAlign.TOP,
-            children: multiLineParagraphs(row.기준),
+            children: multiLineParagraphs(
+              qualificationCriteriaForDocx(row.기준),
+            ),
           }),
         ],
       }),

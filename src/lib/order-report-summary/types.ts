@@ -1,4 +1,5 @@
 import type { OrderReportSummaryStatus } from "@/lib/order-report-summary/sections";
+import { formatQualificationCriteria } from "@/lib/order-report-summary/qualification-format";
 import { normalizeKoreanSummaryText } from "@/lib/order-report-summary/korean-spacing";
 import {
   sanitizeMultilineSummaryText,
@@ -234,7 +235,7 @@ function normalizeQualificationRow(
   >;
   return {
     구분: normalizeSummaryField(row.구분),
-    기준: normalizeMultilineSummaryField(row.기준),
+    기준: formatQualificationCriteria(normalizeMultilineSummaryField(row.기준)),
   };
 }
 

@@ -27,6 +27,10 @@ export const announcementsSubNavItems: NavItem[] = [
   { href: "/dashboard/assigned-notices", label: "부서별 공고" },
 ];
 
+export const bidSubNavItems: NavItem[] = [
+  { href: "/dashboard/bid/amount", label: "입찰금액 결정" },
+];
+
 export const adminSubNavItems: NavItem[] = [
   { href: "/dashboard/admin/users", label: "사용자관리" },
   { href: "/dashboard/admin/departments", label: "부서관리" },

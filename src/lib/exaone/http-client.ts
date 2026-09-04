@@ -23,13 +23,24 @@ function parseExaoneErrorMessage(status: number, body: string): string {
       error?: { message?: string; code?: string };
     };
     if (json.error?.message) {
-      if (status === 404) {
-        return `모델을 찾을 수 없습니다. FRIENDLI_MODEL 환경 변수를 확인하세요. (${json.error.message})`;
+      if (status === 404 || status === 400) {
+        const lower = json.error.message.toLowerCase();
+        if (
+          status === 404 ||
+          lower.includes("not found") ||
+          lower.includes("does not exist") ||
+          lower.includes("unknown model")
+        ) {
+          return `LG엑사원 모델을 찾을 수 없습니다. FRIENDLI_MODEL 환경 변수를 확인하세요. (${json.error.message})`;
+        }
       }
       return `${json.error.message} (HTTP ${status})`;
     }
   } catch {
     // ignore JSON parse errors
+  }
+  if (status === 404) {
+    return "LG엑사원 모델을 찾을 수 없습니다. Friendli Model APIs에서 해당 모델이 제공되는지, FRIENDLI_MODEL 값을 확인하세요.";
   }
   return `LG엑사원 API 오류 (HTTP ${status})`;
 }

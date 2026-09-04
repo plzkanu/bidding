@@ -1,5 +1,5 @@
 export const CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6";
-export const EXAONE_DEFAULT_MODEL = "LGAI-EXAONE/K-EXAONE-236B-A23B";
+export const EXAONE_DEFAULT_MODEL = "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B";
 
 /** 예산 정책: 1차 구현은 호출 횟수·토큰 상한 없음 */
 export const ORDER_REPORT_SUMMARY_BUDGET_POLICY = "unlimited" as const;

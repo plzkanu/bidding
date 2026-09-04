@@ -1,6 +1,12 @@
 /** FriendliAI Serverless API — EXAONE (OpenAI 호환) */
 
-const DEFAULT_MODEL = "LGAI-EXAONE/K-EXAONE-236B-A23B";
+const DEFAULT_MODEL = "LGAI-EXAONE/K-EXAONE-2.0-750B-A37B";
+
+/** Model APIs에서 제거된 모델 → 현재 서버리스 모델 */
+const LEGACY_EXAONE_MODELS: Record<string, string> = {
+  "LGAI-EXAONE/K-EXAONE-236B-A23B": DEFAULT_MODEL,
+  "LGAI-EXAONE/EXAONE-4.0.1-32B": DEFAULT_MODEL,
+};
 
 export function getExaoneApiKey(): string {
   const key = process.env.FRIENDLI_TOKEN;
@@ -9,7 +15,8 @@ export function getExaoneApiKey(): string {
 }
 
 export function getExaoneModel(): string {
-  return process.env.FRIENDLI_MODEL ?? DEFAULT_MODEL;
+  const requested = process.env.FRIENDLI_MODEL ?? DEFAULT_MODEL;
+  return LEGACY_EXAONE_MODELS[requested] ?? requested;
 }
 
 export function isExaoneConfigured(): boolean {

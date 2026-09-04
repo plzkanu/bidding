@@ -4,6 +4,7 @@ import {
   addOrderReport,
   listUserOrderReports,
   removeOrderReport,
+  setOrderReportCompleted,
 } from "@/lib/bid-notices/order-reports";
 import {
   getSupabaseConfigError,
@@ -17,7 +18,7 @@ function supabaseNotConfiguredResponse() {
   );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await getApiSession();
   if (!session) {
     return unauthorizedResponse();
@@ -26,7 +27,12 @@ export async function GET() {
     return supabaseNotConfiguredResponse();
   }
 
-  const { reports, error } = await listUserOrderReports(session.id);
+  const { searchParams } = new URL(request.url);
+  const completedOnly = searchParams.get("completed") === "true";
+
+  const { reports, error } = await listUserOrderReports(session.id, {
+    completedOnly,
+  });
 
   if (error) {
     return NextResponse.json({ error }, { status: 500 });
@@ -67,6 +73,56 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       { error: "발주보고 등록에 실패했습니다." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const session = await getApiSession();
+  if (!session) {
+    return unauthorizedResponse();
+  }
+  if (!isSupabaseConfigured()) {
+    return supabaseNotConfiguredResponse();
+  }
+
+  try {
+    const body = (await request.json()) as {
+      noticeId?: string;
+      isCompleted?: boolean;
+    };
+    const noticeId = body.noticeId?.trim();
+
+    if (!noticeId) {
+      return NextResponse.json(
+        { error: "noticeId는 필수입니다." },
+        { status: 400 },
+      );
+    }
+    if (typeof body.isCompleted !== "boolean") {
+      return NextResponse.json(
+        { error: "isCompleted는 boolean이어야 합니다." },
+        { status: 400 },
+      );
+    }
+
+    const { error } = await setOrderReportCompleted(
+      session.id,
+      noticeId,
+      body.isCompleted,
+    );
+    if (error) {
+      return NextResponse.json({ error }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      noticeId,
+      isCompleted: body.isCompleted,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "발주보고 완료 상태 변경에 실패했습니다." },
       { status: 500 },
     );
   }

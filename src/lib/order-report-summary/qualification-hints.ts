@@ -1,5 +1,6 @@
 /** 첨부 텍스트에서 신청자격·참가제한 조항 추출 (LLM 보조·후처리) */
 
+import { formatQualificationCriteria } from "@/lib/order-report-summary/qualification-format";
 import { preprocessAttachmentTextForHints } from "@/lib/order-report-summary/text-hints";
 import { sanitizeMultilineSummaryText } from "@/lib/order-report-summary/text-sanitize";
 import type {
@@ -334,10 +335,10 @@ export function buildQualificationHintPromptBlock(
 
   return [
     "=== 첨부 텍스트 자동 추출 힌트 (신청자격·참가제한) ===",
-    "아래는 원문에서 찾은 참가자격·제한 조항입니다. **요약·생략 없이** 신청자격 배열에 반영하세요.",
-    "- 문서에 있는 조항을 빠짐없이 기록 (면허·등록, 실적, 기업규모, 참가제한, PQ, 지역제한, 신인도, 공동·하도급, 기타)",
-    "- 각 조항은 한 줄씩 \\n 으로 구분. 법령명·수치·기한은 원문 유지",
-    "- 힌트에 있는 조항을 LLM 결과에서 누락하지 말 것",
+    "아래는 원문에서 찾은 참가자격·제한 조항입니다. 조건은 빠짐없이 반영하되, 각 조항은 **한 줄로 요약**하세요.",
+    "- 면허명·등급·금액·기간·건수·허용/불허는 유지",
+    "- 법령 조문 전문, 보안규정 전문, 서문(다음 각 호의...)은 쓰지 말 것",
+    "- 각 조항은 한 줄씩 \\n 으로 구분",
     ...sections,
   ].join("\n");
 }
@@ -347,23 +348,6 @@ function splitCriteriaLines(value: string): string[] {
     .split("\n")
     .map((line) => cleanQualificationLine(line))
     .filter((line) => line && line !== EMPTY_SUMMARY_VALUE);
-}
-
-function mergeCriteriaLines(existing: string, additions: string[]): string {
-  const merged = new Set<string>();
-  for (const line of splitCriteriaLines(existing)) {
-    merged.add(normalizeLineKey(line));
-  }
-
-  const lines = splitCriteriaLines(existing);
-  for (const addition of additions) {
-    const key = normalizeLineKey(addition);
-    if (!key || merged.has(key)) continue;
-    merged.add(key);
-    lines.push(addition);
-  }
-
-  return lines.join("\n");
 }
 
 function hintsToRows(hints: QualificationHint[]): OrderReportSummaryQualificationRow[] {
@@ -377,7 +361,7 @@ function hintsToRows(hints: QualificationHint[]): OrderReportSummaryQualificatio
 
   return [...byCategory.entries()].map(([구분, lines]) => ({
     구분,
-    기준: dedupeLines(lines).join("\n"),
+    기준: formatQualificationCriteria(dedupeLines(lines).join("\n")),
   }));
 }
 
@@ -399,7 +383,7 @@ export function applyQualificationHints(
   for (const row of existingRows) {
     mergedByCategory.set(row.구분, {
       구분: row.구분,
-      기준: sanitizeMultilineSummaryText(row.기준),
+      기준: formatQualificationCriteria(sanitizeMultilineSummaryText(row.기준)),
     });
   }
 
@@ -413,19 +397,16 @@ export function applyQualificationHints(
       ) ?? hintRow.구분;
 
     const current = mergedByCategory.get(matchedKey);
-    const additions = splitCriteriaLines(hintRow.기준);
+    const summarizedHint = formatQualificationCriteria(hintRow.기준);
 
-    if (!current) {
-      mergedByCategory.set(hintRow.구분, {
-        구분: hintRow.구분,
-        기준: hintRow.기준,
-      });
+    // LLM이 이미 해당 구분을 요약했으면 원문 힌트를 덧붙이지 않음 (장문 재유입 방지)
+    if (current && splitCriteriaLines(current.기준).length > 0) {
       continue;
     }
 
     mergedByCategory.set(matchedKey, {
-      구분: current.구분,
-      기준: mergeCriteriaLines(current.기준, additions),
+      구분: current?.구분 ?? hintRow.구분,
+      기준: summarizedHint,
     });
   }
 

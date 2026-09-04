@@ -64,10 +64,10 @@ function buildNoticeContext(notice: KhnpBidNoticeRow): string {
 }
 
 const EXAONE_JSON_RETRY_HINT = `이전 응답이 잘못되었습니다. 반드시 유효한 JSON만 출력하세요.
-- 신청자격.기준은 입찰 참가 판단에 필요한 핵심 조건만 (불필요한 법령 전문·보안 규정 전문 제외)
+- 신청자격.기준은 입찰 참가 판단에 필요한 핵심 조건만 한 줄씩 (법령 전문·보안 규정 전문·서문 제외)
 - 한글 문장은 **띄어쓰기를 포함**하여 작성 (공백 없이 이어 붙이지 말 것)
 - JSON 문자열 안의 따옴표는 \\" 로 이스케이프
-- 각 기준은 한 줄당 300자 이내`;
+- 각 기준은 한 줄당 80자 이내`;
 
 async function requestExaoneSummaryJson(
   userContent: string,

@@ -11,6 +11,8 @@ export interface UserOrderReport {
   noticeId: string;
   submittedAt: string;
   siteId: number;
+  isCompleted: boolean;
+  completedAt: string | null;
   notice: KhnpBidNoticeRow;
 }
 
@@ -46,19 +48,54 @@ function supabaseNotReadyError(): string | null {
 
 export async function listUserOrderReports(
   userId: string,
+  options?: { completedOnly?: boolean },
 ): Promise<{ reports: UserOrderReport[]; error: string | null }> {
   const configError = supabaseNotReadyError();
   if (configError) {
     return { reports: [], error: configError };
   }
 
+  const completedOnly = options?.completedOnly === true;
+
   try {
     const supabase = createServerClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from("user_order_reports")
-      .select("id, notice_id, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
+      .select("id, notice_id, created_at, is_completed, completed_at")
+      .eq("user_id", userId);
+
+    if (completedOnly) {
+      query = query.eq("is_completed", true).order("completed_at", {
+        ascending: false,
+        nullsFirst: false,
+      });
+    } else {
+      query = query.order("created_at", { ascending: false });
+    }
+
+    let { data, error } = await query;
+
+    // 025 마이그레이션 미적용 시 완료 컬럼 없이 재조회
+    if (
+      error &&
+      (error.message.includes("is_completed") ||
+        error.message.includes("completed_at"))
+    ) {
+      if (completedOnly) {
+        return {
+          reports: [],
+          error:
+            "입찰금액 결정 대상을 조회하려면 Supabase에 025_user_order_reports_completed.sql을 적용해 주세요.",
+        };
+      }
+      const fallback = await supabase
+        .from("user_order_reports")
+        .select("id, notice_id, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       return { reports: [], error: normalizeOrderReportsError(error.message) };
@@ -76,12 +113,18 @@ export async function listUserOrderReports(
       .map((row) => {
         const notice = notices.get(row.notice_id as string);
         if (!notice) return null;
+        const completedRow = row as {
+          is_completed?: boolean | null;
+          completed_at?: string | null;
+        };
 
         return {
           id: row.id as string,
           noticeId: row.notice_id as string,
           submittedAt: row.created_at as string,
           siteId: notice.site_id,
+          isCompleted: Boolean(completedRow.is_completed),
+          completedAt: completedRow.completed_at ?? null,
           notice,
         };
       })
@@ -198,6 +241,55 @@ export async function removeOrderReport(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "발주보고 취소에 실패했습니다.";
+    return { error: normalizeOrderReportsError(message) };
+  }
+}
+
+export async function setOrderReportCompleted(
+  userId: string,
+  noticeId: string,
+  isCompleted: boolean,
+): Promise<{ error: string | null }> {
+  const configError = supabaseNotReadyError();
+  if (configError) {
+    return { error: configError };
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("user_order_reports")
+      .update({
+        is_completed: isCompleted,
+        completed_at: isCompleted ? new Date().toISOString() : null,
+      })
+      .eq("user_id", userId)
+      .eq("notice_id", noticeId)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      if (
+        error.message.includes("is_completed") ||
+        error.message.includes("completed_at")
+      ) {
+        return {
+          error:
+            "보고 완료 기능을 사용하려면 Supabase에 025_user_order_reports_completed.sql을 적용해 주세요.",
+        };
+      }
+      return { error: normalizeOrderReportsError(error.message) };
+    }
+    if (!data) {
+      return { error: "발주보고를 찾을 수 없습니다." };
+    }
+
+    return { error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "발주보고 완료 상태 변경에 실패했습니다.";
     return { error: normalizeOrderReportsError(message) };
   }
 }

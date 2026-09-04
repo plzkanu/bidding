@@ -4,9 +4,11 @@ import { getCrawlSites } from "@/lib/crawl-sites";
 import type { DeadlineWindow } from "./deadline";
 import {
   getNoticeSearchOrFilter,
+  getNoticeListOrderColumn,
   getNoticeSelect,
   getNoticeTableName,
   getNoticeTypeDbValues,
+  excludesExpiredNoticesInDefaultList,
   hasNoticeDateColumn,
   isCrawlMasterDataset,
   isNoticeTypeValidForDataset,
@@ -143,7 +145,11 @@ function applySearchFilter<T extends NoticeQuery>(
   if (!safe) return query;
 
   const pattern = `%${safe}%`;
-  return query.or(getNoticeSearchOrFilter(dataset, pattern)) as T;
+  let orFilter = getNoticeSearchOrFilter(dataset, pattern);
+  if (/^[A-Za-z0-9_-]+$/.test(safe)) {
+    orFilter = `${orFilter},notice_no.eq.${safe}`;
+  }
+  return query.or(orFilter) as T;
 }
 
 function applyKeywordScreeningFilter<T extends NoticeQuery>(
@@ -264,6 +270,98 @@ const CRAWL_MASTER_FALLBACK_DETAIL_KEYS: Record<
   ex: { open: "ex_bid_open" },
   kr: { open: "kr_bid_open" },
 };
+
+function hasActiveSearch(search: string | undefined): boolean {
+  return Boolean(search?.trim());
+}
+
+async function listStandardBidNoticesWithSearchFirst(
+  dataset: BidNoticeDataset,
+  options: ListBidNoticesOptions & { siteId: number },
+  page: number,
+  pageSize: number,
+  screeningKeywords: string[],
+): Promise<BidNoticeListResult> {
+  const supabase = createServerClient();
+  const table = getNoticeTableName(dataset);
+  const select = getNoticeSelect(dataset);
+  const noticeTypeValues = getNoticeTypeDbValues(dataset, options.noticeType);
+
+  let query = supabase
+    .from(table)
+    .select(select)
+    .eq("site_id", options.siteId)
+    .eq("is_deleted", false);
+
+  if (noticeTypeValues.length === 1) {
+    query = query.eq("notice_type", noticeTypeValues[0]!);
+  } else {
+    query = query.in("notice_type", noticeTypeValues);
+  }
+
+  query = applySearchFilter(query, options.search, dataset);
+  if (hasNoticeDateColumn(dataset)) {
+    query = applyNoticeDateFilters(query, options);
+  }
+
+  const { data, error } = await query.order(getNoticeListOrderColumn(dataset), {
+    ascending: false,
+    nullsFirst: false,
+  });
+
+  if (error) {
+    return { notices: [], total: 0, error: error.message };
+  }
+
+  let notices = ((data ?? []) as KhnpBidNoticeRow[]).map((row) =>
+    normalizeNoticeRow(dataset, row),
+  );
+
+  if (!hasNoticeDateColumn(dataset)) {
+    notices = filterNoticesByNormalizedDate(notices, options);
+  }
+
+  if (screeningKeywords.length > 0) {
+    notices = notices.filter((notice) =>
+      matchesKeywordScreening(notice, screeningKeywords),
+    );
+  }
+
+  if (options.favoritesOnly) {
+    if (!options.userId) {
+      return { notices: [], total: 0, error: "로그인이 필요합니다." };
+    }
+    const { noticeIds: favoriteIds, error: favError } = await getFavoriteNoticeIds(
+      options.userId,
+      { siteId: options.siteId, noticeType: options.noticeType },
+    );
+    if (favError) {
+      return { notices: [], total: 0, error: favError };
+    }
+    const favoriteSet = new Set(favoriteIds);
+    notices = notices.filter((notice) => favoriteSet.has(notice.id));
+  }
+
+  const now = new Date();
+  if (options.deadlineWindow) {
+    notices = notices.filter((notice) =>
+      isApproachingDeadline(notice, options.deadlineWindow!, now),
+    );
+    notices.sort((a, b) => {
+      const da = getNoticeDeadline(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const db = getNoticeDeadline(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return da - db;
+    });
+  } else if (options.deadlineClosed) {
+    notices = notices.filter((notice) => isDeadlineExpired(notice, now));
+  } else if (!hasActiveSearch(options.search)) {
+    if (excludesExpiredNoticesInDefaultList(dataset)) {
+      notices = notices.filter((notice) => !isDeadlineExpired(notice, now));
+    }
+  }
+
+  return finalizeNoticePage(notices, options, page, pageSize);
+}
 
 async function listCrawlMasterBidNotices(
   dataset: CrawlMasterDataset,
@@ -521,6 +619,16 @@ async function listBidNoticesForSite(
         return { notices: [], total: 0, error: null };
       }
       screeningKeywords = keywords;
+    }
+
+    if (hasActiveSearch(options.search)) {
+      return listStandardBidNoticesWithSearchFirst(
+        dataset,
+        options,
+        page,
+        pageSize,
+        screeningKeywords,
+      );
     }
 
     async function fetchFilteredNotices(noticeIds: string[]) {

@@ -257,3 +257,62 @@ export async function cycleNoticeScreeningStatus(
     return { status: "WAITING", error: normalizeScreeningError(message) };
   }
 }
+
+const BULK_SCREENING_MAX_NOTICE_IDS = 10_000;
+
+export async function bulkSetNoticeScreeningStatuses(
+  userId: string,
+  noticeIds: string[],
+  status: BidNoticeScreeningStatus,
+): Promise<{ updatedCount: number; error: string | null }> {
+  const configError = supabaseNotReadyError();
+  if (configError) {
+    return { updatedCount: 0, error: configError };
+  }
+
+  const uniqueIds = [...new Set(noticeIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return { updatedCount: 0, error: "선별할 공고가 없습니다." };
+  }
+  if (uniqueIds.length > BULK_SCREENING_MAX_NOTICE_IDS) {
+    return {
+      updatedCount: 0,
+      error: `일괄 선별은 최대 ${BULK_SCREENING_MAX_NOTICE_IDS.toLocaleString("ko-KR")}건까지 가능합니다.`,
+    };
+  }
+
+  const nextStatus = parseScreeningStatus(status);
+  const now = new Date().toISOString();
+
+  try {
+    const supabase = createServerClient();
+    let updatedCount = 0;
+
+    for (const idChunk of chunkIds(uniqueIds)) {
+      const rows = idChunk.map((noticeId) => ({
+        user_id: userId,
+        notice_id: noticeId,
+        status: nextStatus,
+        updated_at: now,
+      }));
+
+      const { error } = await supabase
+        .from("user_bid_notice_screening")
+        .upsert(rows, { onConflict: "user_id,notice_id" });
+
+      if (error) {
+        return {
+          updatedCount,
+          error: normalizeScreeningError(error.message),
+        };
+      }
+      updatedCount += idChunk.length;
+    }
+
+    return { updatedCount, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "일괄 선별에 실패했습니다.";
+    return { updatedCount: 0, error: normalizeScreeningError(message) };
+  }
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BidNoticeDetailModal } from "@/components/bid-notice-detail-modal";
@@ -20,13 +20,18 @@ import {
 
 const LIST_TABLE_CLASS = "w-full table-fixed text-left text-xs";
 const NOTICE_NO_COL_CLASS = "w-[5.5rem] whitespace-nowrap px-2 py-1.5";
+const SITE_COL_CLASS = "w-[6.75rem] truncate px-2 py-1.5";
 const NOTICE_TITLE_COL_CLASS =
-  "w-[18rem] max-w-[18rem] px-2 py-1.5 break-words align-top";
+  "w-[18rem] max-w-[18rem] px-2 py-1.5 break-words align-middle";
 const DATE_COL_CLASS = LIST_DATETIME_COL_CLASS;
 const DEPT_COL_CLASS = "w-[6rem] truncate px-2 py-1.5";
 const SUMMARY_COL_CLASS = "w-[4.5rem] px-2 py-1.5";
 const PQ_COL_CLASS = "w-[7rem] px-2 py-1.5 leading-tight break-words";
-const ACTION_COL_CLASS = "w-[6.5rem] px-2 py-1.5";
+const STATUS_COL_CLASS = "w-[4rem] px-2 py-1.5";
+const ACTION_COL_CLASS = "w-[9.5rem] px-2 py-1.5";
+
+type CompletionFilter = "all" | "pending" | "completed";
+
 export function OrderReportsList() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,6 +41,9 @@ export function OrderReportsList() {
   const [reports, setReports] = useState<UserOrderReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [completionFilter, setCompletionFilter] =
+    useState<CompletionFilter>("all");
   const [error, setError] = useState("");
   const [detailNotice, setDetailNotice] = useState<UserOrderReport["notice"] | null>(
     null,
@@ -49,6 +57,19 @@ export function OrderReportsList() {
   const [detailSiteName, setDetailSiteName] = useState<string | undefined>();
 
   const siteNameById = new Map(sites.map((s) => [s.id, s.site_name]));
+
+  const filteredReports = useMemo(() => {
+    if (completionFilter === "pending") {
+      return reports.filter((r) => !r.isCompleted);
+    }
+    if (completionFilter === "completed") {
+      return reports.filter((r) => r.isCompleted);
+    }
+    return reports;
+  }, [reports, completionFilter]);
+
+  const pendingCount = reports.filter((r) => !r.isCompleted).length;
+  const completedCount = reports.filter((r) => r.isCompleted).length;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -143,6 +164,46 @@ export function OrderReportsList() {
     }
   }
 
+  async function toggleReportCompleted(
+    noticeId: string,
+    nextCompleted: boolean,
+  ) {
+    setCompletingId(noticeId);
+    setError("");
+    try {
+      const response = await fetch("/api/order-reports", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noticeId, isCompleted: nextCompleted }),
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(
+          data.error ?? "발주보고 완료 상태 변경에 실패했습니다.",
+        );
+      }
+      setReports((prev) =>
+        prev.map((r) =>
+          r.noticeId === noticeId
+            ? {
+                ...r,
+                isCompleted: nextCompleted,
+                completedAt: nextCompleted ? new Date().toISOString() : null,
+              }
+            : r,
+        ),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "발주보고 완료 상태 변경에 실패했습니다.",
+      );
+    } finally {
+      setCompletingId(null);
+    }
+  }
+
   function openDetail(report: UserOrderReport) {
     setDetailNotice(report.notice);
     setDetailSiteName(siteNameById.get(report.siteId));
@@ -152,13 +213,49 @@ export function OrderReportsList() {
     <div className="flex h-full min-h-0 flex-col">
       <p className="text-sm text-slate-600">
         입찰공고 조회·관심공고에서 등록한 발주보고 건입니다. 「요약 작성」에서
-        첨부파일 기반 발주요약 화면으로 이동합니다.
+        첨부파일 기반 발주요약 화면으로 이동합니다. 「보고 완료」로 보고 여부를
+        표시·관리할 수 있습니다.
       </p>
 
       {error ? (
         <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
           {error}
         </p>
+      ) : null}
+
+      {!isLoading && reports.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {(
+            [
+              { id: "all", label: "전체", count: reports.length },
+              { id: "pending", label: "미완료", count: pendingCount },
+              { id: "completed", label: "완료", count: completedCount },
+            ] as const
+          ).map((tab) => {
+            const selected = completionFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setCompletionFilter(tab.id)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selected
+                    ? "border-[#004b87] bg-[#004b87] text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {tab.label}
+                <span
+                  className={`ml-1.5 tabular-nums ${
+                    selected ? "text-white/80" : "text-slate-400"
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       ) : null}
 
       <div className="mt-4 flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -186,6 +283,12 @@ export function OrderReportsList() {
               에서 작업 → 발주보고를 눌러 추가하세요.
             </p>
           </div>
+        ) : filteredReports.length === 0 ? (
+          <p className="px-6 py-16 text-center text-sm text-slate-400">
+            {completionFilter === "completed"
+              ? "완료된 발주보고가 없습니다."
+              : "미완료 발주보고가 없습니다."}
+          </p>
         ) : (
           <div>
             <table className={LIST_TABLE_CLASS}>
@@ -194,11 +297,13 @@ export function OrderReportsList() {
                   <th className={`${NOTICE_NO_COL_CLASS} font-medium`}>
                     공고번호
                   </th>
+                  <th
+                    className={`${SITE_COL_CLASS} whitespace-nowrap font-medium`}
+                  >
+                    사이트
+                  </th>
                   <th className={`${NOTICE_TITLE_COL_CLASS} font-medium`}>
                     공고명
-                  </th>
-                  <th className="w-[4.5rem] whitespace-nowrap px-2 py-1.5 font-medium">
-                    사이트
                   </th>
                   <th className={`${DEPT_COL_CLASS} font-medium`}>부서</th>
                   <th className={`${DATE_COL_CLASS} font-medium`}>
@@ -206,14 +311,16 @@ export function OrderReportsList() {
                   </th>
                   <th className={`${SUMMARY_COL_CLASS} font-medium`}>요약</th>
                   <th className={`${PQ_COL_CLASS} font-medium`}>PQ유무</th>
+                  <th className={`${STATUS_COL_CLASS} font-medium`}>상태</th>
                   <th className={`${ACTION_COL_CLASS} font-medium`}>관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {reports.map((report) => {
+                {filteredReports.map((report) => {
                   const notice = report.notice;
                   const isHighlighted = highlightNoticeId === report.noticeId;
                   const isCancelling = cancellingId === report.noticeId;
+                  const isCompleting = completingId === report.noticeId;
                   const pqMeta =
                     pqMetaByNoticeId[report.noticeId] ??
                     ({
@@ -231,7 +338,9 @@ export function OrderReportsList() {
                       className={`cursor-pointer hover:bg-slate-50/80 ${
                         isHighlighted
                           ? "bg-[#004b87]/5 ring-1 ring-inset ring-[#004b87]/20"
-                          : ""
+                          : report.isCompleted
+                            ? "bg-emerald-50/40"
+                            : ""
                       }`}
                       onClick={() => openDetail(report)}
                       onKeyDown={(e) => {
@@ -245,13 +354,13 @@ export function OrderReportsList() {
                       <td className={`${NOTICE_NO_COL_CLASS} text-slate-700`}>
                         {notice.notice_no}
                       </td>
+                      <td className={`${SITE_COL_CLASS} text-slate-600`}>
+                        {siteNameById.get(report.siteId) ?? "-"}
+                      </td>
                       <td
                         className={`${NOTICE_TITLE_COL_CLASS} font-medium text-[#004b87]`}
                       >
                         {notice.title}
-                      </td>
-                      <td className="w-[4.5rem] truncate px-2 py-1.5 text-slate-600">
-                        {siteNameById.get(report.siteId) ?? "-"}
                       </td>
                       <td className={`${DEPT_COL_CLASS} text-slate-600`}>
                         {formatDeptNameForList(notice.dept_name)}
@@ -274,6 +383,24 @@ export function OrderReportsList() {
                           {pqMeta.pqLabel}
                         </span>
                       </td>
+                      <td className={STATUS_COL_CLASS}>
+                        {report.isCompleted ? (
+                          <span
+                            className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700"
+                            title={
+                              report.completedAt
+                                ? `완료: ${formatListDateTime(report.completedAt)}`
+                                : undefined
+                            }
+                          >
+                            완료
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                            미완료
+                          </span>
+                        )}
+                      </td>
                       <td className={ACTION_COL_CLASS}>
                         <div
                           className="flex flex-row items-center justify-center gap-1"
@@ -287,6 +414,43 @@ export function OrderReportsList() {
                             <span>요약</span>
                             <span>작성</span>
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleReportCompleted(
+                                report.noticeId,
+                                !report.isCompleted,
+                              )
+                            }
+                            disabled={isCompleting}
+                            className={`flex size-10 shrink-0 cursor-pointer flex-col items-center justify-center rounded border text-[10px] font-medium leading-tight disabled:cursor-not-allowed disabled:opacity-40 ${
+                              report.isCompleted
+                                ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                            }`}
+                            title={
+                              report.isCompleted
+                                ? "보고 완료 취소"
+                                : "보고 완료로 표시"
+                            }
+                          >
+                            {isCompleting ? (
+                              <>
+                                <span>처리</span>
+                                <span>중…</span>
+                              </>
+                            ) : report.isCompleted ? (
+                              <>
+                                <span>완료</span>
+                                <span>취소</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>보고</span>
+                                <span>완료</span>
+                              </>
+                            )}
+                          </button>
                           <button
                             type="button"
                             onClick={() => cancelOrderReport(report.noticeId)}

@@ -125,6 +125,39 @@ CREATE TABLE IF NOT EXISTS user_order_reports (
 CREATE INDEX IF NOT EXISTS idx_user_order_reports_user_id ON user_order_reports(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_order_reports_notice_id ON user_order_reports(notice_id);
 
+-- 025 user_order_reports 보고 완료
+ALTER TABLE user_order_reports
+  ADD COLUMN IF NOT EXISTS is_completed BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_user_order_reports_is_completed
+  ON user_order_reports(user_id, is_completed);
+
+-- 026 user_bid_amount_decisions 투찰금액 결정
+CREATE TABLE IF NOT EXISTS user_bid_amount_decisions (
+  id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  notice_id    UUID NOT NULL,
+  bid_amount   NUMERIC(18, 0),
+  base_amount  NUMERIC(18, 0),
+  award_rate   NUMERIC(10, 4),
+  bid_rate     NUMERIC(10, 4),
+  memo         TEXT,
+  status       TEXT NOT NULL DEFAULT 'DRAFT'
+                 CHECK (status IN ('DRAFT', 'DECIDED')),
+  decided_at   TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, notice_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_bid_amount_decisions_user_id
+  ON user_bid_amount_decisions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_bid_amount_decisions_notice_id
+  ON user_bid_amount_decisions(notice_id);
+CREATE INDEX IF NOT EXISTS idx_user_bid_amount_decisions_status
+  ON user_bid_amount_decisions(user_id, status);
+
 -- 007 bid_notice_attachments + Storage
 CREATE TABLE IF NOT EXISTS bid_notice_attachments (
   id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -291,6 +324,7 @@ ALTER TABLE user_bid_notice_memos DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_bid_submissions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_estimate_submissions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_order_reports DISABLE ROW LEVEL SECURITY;
+ALTER TABLE user_bid_amount_decisions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bid_notice_attachments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_bid_notice_screening DISABLE ROW LEVEL SECURITY;
 ALTER TABLE user_order_report_summaries DISABLE ROW LEVEL SECURITY;
