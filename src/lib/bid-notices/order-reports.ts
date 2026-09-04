@@ -93,7 +93,11 @@ export async function listUserOrderReports(
         .select("id, notice_id, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false });
-      data = fallback.data;
+      data = (fallback.data ?? []).map((row) => ({
+        ...row,
+        is_completed: false,
+        completed_at: null,
+      }));
       error = fallback.error;
     }
 
