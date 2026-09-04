@@ -313,7 +313,7 @@ async function listStandardBidNoticesWithSearchFirst(
     return { notices: [], total: 0, error: error.message };
   }
 
-  let notices = ((data ?? []) as KhnpBidNoticeRow[]).map((row) =>
+  let notices = ((data ?? []) as unknown as KhnpBidNoticeRow[]).map((row) =>
     normalizeNoticeRow(dataset, row),
   );
 
@@ -431,7 +431,7 @@ async function listCrawlMasterBidNotices(
       if (fallbackError) {
         return { notices: [], total: 0, error: fallbackError.message };
       }
-      rows = ((fallbackData ?? []) as CrawlMasterListRow[]).map((row) => ({
+      rows = ((fallbackData ?? []) as unknown as CrawlMasterListRow[]).map((row) => ({
         ...row,
         [detailKeys.open]: null,
         ...(detailKeys.preSpec ? { [detailKeys.preSpec]: null } : {}),
