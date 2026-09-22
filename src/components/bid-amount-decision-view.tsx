@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { BidAmountSummarySheet } from "@/components/bid-amount-summary-sheet";
 import type { CrawlSite } from "@/lib/crawl-sites";
+import { buildBidAmountSheetData } from "@/lib/bid-notices/bid-amount-sheet";
 import type { UserBidAmountDecision } from "@/lib/bid-notices/bid-amounts";
 import {
   BID_NOTICE_TYPE_LABELS,
@@ -20,6 +22,7 @@ import {
   parseAmountInput,
   parseOpeningPercentValue,
 } from "@/lib/bid-opening-results-format";
+import type { OrderReportSummaryRecord } from "@/lib/order-report-summary/types";
 
 interface BidAmountDecisionViewProps {
   noticeId: string;
@@ -39,6 +42,8 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
   const [notice, setNotice] = useState<KhnpBidNoticeRow | null>(null);
   const [siteName, setSiteName] = useState<string | undefined>();
   const [decision, setDecision] = useState<UserBidAmountDecision | null>(null);
+  const [summaryRecord, setSummaryRecord] =
+    useState<OrderReportSummaryRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -64,12 +69,16 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
     setError("");
     setSuccessMessage("");
     try {
-      const [noticeRes, sitesRes, decisionRes, reportsRes] = await Promise.all([
-        fetch(`/api/bid-notices/${encodeURIComponent(noticeId)}`),
-        fetch("/api/crawl-sites"),
-        fetch(`/api/bid-amounts/${encodeURIComponent(noticeId)}`),
-        fetch("/api/order-reports?completed=true"),
-      ]);
+      const [noticeRes, sitesRes, decisionRes, reportsRes, summaryRes] =
+        await Promise.all([
+          fetch(`/api/bid-notices/${encodeURIComponent(noticeId)}`),
+          fetch("/api/crawl-sites"),
+          fetch(`/api/bid-amounts/${encodeURIComponent(noticeId)}`),
+          fetch("/api/order-reports?completed=true"),
+          fetch(
+            `/api/order-report-summaries/${encodeURIComponent(noticeId)}`,
+          ),
+        ]);
 
       const noticeData = (await noticeRes.json()) as {
         notice?: KhnpBidNoticeRow;
@@ -85,6 +94,10 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
       };
       const reportsData = (await reportsRes.json()) as {
         noticeIds?: string[];
+        error?: string;
+      };
+      const summaryData = (await summaryRes.json()) as {
+        summary?: OrderReportSummaryRecord;
         error?: string;
       };
 
@@ -120,14 +133,40 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
 
       const nextDecision = decisionData.decision ?? null;
       setDecision(nextDecision);
+      const nextSummary =
+        summaryRes.ok && summaryData.summary?.status === "COMPLETED"
+          ? summaryData.summary
+          : null;
+      setSummaryRecord(nextSummary);
+
+      const nextOpen = nextNotice ? getOpenDetail(nextNotice) : null;
+      const sheet = nextSummary?.summary
+        ? buildBidAmountSheetData(
+            nextSummary.summary,
+            nextSummary.keyFieldsConfirmation,
+            nextNotice?.title,
+            nextSummary.pqSummary,
+            {
+              bidMethod: nextOpen?.bid_method,
+              awardMethod: nextOpen?.award_method,
+              bidCloseDt: nextOpen?.bid_close_dt,
+            },
+          )
+        : null;
+
       setBidAmount(amountToInput(nextDecision?.bidAmount));
-      setBaseAmount(amountToInput(nextDecision?.baseAmount));
+      setBaseAmount(
+        amountToInput(
+          nextDecision?.baseAmount ?? sheet?.baseAmountNumber ?? null,
+        ),
+      );
       setAwardRate(rateToInput(nextDecision?.awardRate));
       setMemo(nextDecision?.memo ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "오류가 발생했습니다.");
       setNotice(null);
       setDecision(null);
+      setSummaryRecord(null);
     } finally {
       setIsLoading(false);
     }
@@ -211,6 +250,19 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
 
   const open = getOpenDetail(notice);
   const isDecided = decision?.status === "DECIDED";
+  const sheet = summaryRecord?.summary
+    ? buildBidAmountSheetData(
+        summaryRecord.summary,
+        summaryRecord.keyFieldsConfirmation,
+        notice.title,
+        summaryRecord.pqSummary,
+        {
+          bidMethod: open?.bid_method,
+          awardMethod: open?.award_method,
+          bidCloseDt: open?.bid_close_dt,
+        },
+      )
+    : null;
 
   return (
     <div className="space-y-4">
@@ -304,24 +356,67 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-800">투찰금액 결정</h2>
         <p className="mt-1 text-xs text-slate-500">
-          기초금액·낙찰율을 입력하면 투찰율이 자동 계산됩니다. 「임시 저장」후
-          「투찰금액 확정」으로 확정할 수 있습니다.
+          {sheet
+            ? "발주요약을 입찰내역 양식(I. 입찰 내역 · II. 적격심사 · Ⅲ. 투찰가격)에 표시합니다. 투찰가격을 입력하고 낙찰율을 넣으면 투찰율이 계산됩니다."
+            : "발주요약이 없으면 금액을 직접 입력합니다. 요약을 생성하면 양식에 자동으로 채워집니다."}
         </p>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              기초금액 (원)
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={baseAmount}
-              onChange={(e) => setBaseAmount(e.target.value)}
-              placeholder="예: 1000000000"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+        {sheet ? (
+          <div className="mt-4">
+            <BidAmountSummarySheet
+              sheet={sheet}
+              bidAmount={bidAmount}
+              onBidAmountChange={setBidAmount}
+              disabled={isSaving}
             />
           </div>
+        ) : (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            발주요약이 아직 없습니다.{" "}
+            <Link
+              href={`/dashboard/order-report/${encodeURIComponent(noticeId)}`}
+              className="font-medium underline-offset-2 hover:underline"
+            >
+              발주요약
+            </Link>
+            에서 요약을 생성·확인하면 이 양식에 반영됩니다.
+          </p>
+        )}
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {sheet ? null : (
+            <>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  기초금액 (원)
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={baseAmount}
+                  onChange={(e) => setBaseAmount(e.target.value)}
+                  placeholder="예: 1000000000"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  투찰금액 (원)
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={bidAmount}
+                  onChange={(e) => setBidAmount(e.target.value)}
+                  placeholder="예: 850000000"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  입력값: {formatOpeningAmount(parseAmountInput(bidAmount))}원
+                </p>
+              </div>
+            </>
+          )}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
               낙찰율 (%)
@@ -337,29 +432,13 @@ export function BidAmountDecisionView({ noticeId }: BidAmountDecisionViewProps) 
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              투찰금액 (원)
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={bidAmount}
-              onChange={(e) => setBidAmount(e.target.value)}
-              placeholder="예: 850000000"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#009ada] focus:ring-2 focus:ring-[#009ada]/20"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              입력값: {formatOpeningAmount(parseAmountInput(bidAmount))}원
-            </p>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
               투찰율 (자동)
             </label>
             <div className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm tabular-nums text-slate-700">
               {formatOpeningRate(computedBidRate)}
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              투찰금액 ÷ 낙찰율 ÷ 기초금액 × 100
+              투찰가격 ÷ 낙찰율 ÷ 예비가격기초금액 × 100
             </p>
           </div>
           <div className="sm:col-span-2">

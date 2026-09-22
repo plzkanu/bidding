@@ -29,8 +29,8 @@ export const ORDER_REPORT_SUMMARY_SECTIONS: OrderReportSummarySection[] = [
   {
     id: "project_name",
     title: "I. 공사명",
-    description: "공사·용역 명칭",
-    fields: ["공사명"],
+    description: "공사·용역 명칭과 분류",
+    fields: ["공사명", "분류"],
   },
   {
     id: "overview",
@@ -38,7 +38,9 @@ export const ORDER_REPORT_SUMMARY_SECTIONS: OrderReportSummarySection[] = [
     description: "발주자, 금액, 기간, 내용 및 하위 표",
     fields: [
       "발주자",
-      "기초금액",
+      "입찰방법",
+      "추정가격",
+      "예비가격기초금액",
       "공사기간",
       "공사내용",
       "대상설비",

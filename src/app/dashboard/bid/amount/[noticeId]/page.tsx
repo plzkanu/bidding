@@ -18,7 +18,7 @@ export default async function BidAmountDecisionPage({
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#004b87]">투찰금액 결정</h1>
         <p className="mt-2 text-sm text-slate-600">
-          기초금액·낙찰율·투찰금액을 입력하고 투찰율을 확인한 뒤 확정합니다.
+          발주요약 양식을 기준으로 투찰가격을 입력하고 확정합니다.
         </p>
       </div>
 

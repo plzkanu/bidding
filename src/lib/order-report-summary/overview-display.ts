@@ -83,7 +83,7 @@ export function dedupeOverviewFinancialFields<
   };
 }
 
-/** 공사개요.기초금액 필드 → 미리보기 행 (라벨 "기초금액" 고정 사용 안 함) */
+/** 공사개요.기초금액 필드 → 미리보기 행 (원문 항목명 유지) */
 export function toOverviewBaseAmountRow(
   raw: string,
   labelPrefix = "",
@@ -99,7 +99,32 @@ export function toOverviewBaseAmountRow(
     };
   }
 
-  return { label: `${labelPrefix}금액`, value: raw };
+  return { label: `${labelPrefix}기초금액`, value: raw };
+}
+
+/** 공사개요.비고 → 금액 행 / ※ 각주 분리 */
+export function partitionOverviewRemarks(
+  remarks: string,
+  labelPrefix = "",
+): { rows: OverviewDisplayRow[]; footnotes: string } {
+  const all = toOverviewRemarkRows(remarks, labelPrefix);
+  const rows: OverviewDisplayRow[] = [];
+  const footnoteLines: string[] = [];
+
+  for (const row of all) {
+    const genericNote =
+      row.label === `${labelPrefix}비고` || row.label === "비고";
+    if (genericNote) {
+      footnoteLines.push(row.value);
+    } else {
+      rows.push(row);
+    }
+  }
+
+  return {
+    rows,
+    footnotes: footnoteLines.join("\n"),
+  };
 }
 
 /** 공사개요.비고 → 금액·특이사항 행 (값 없는 기초금액·추정가격 줄 제외) */

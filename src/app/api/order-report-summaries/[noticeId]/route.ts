@@ -2,17 +2,19 @@ import { NextResponse } from "next/server";
 import { getApiSession, unauthorizedResponse } from "@/lib/api-auth";
 import {
   cancelOrderReportSummary,
+  confirmOrderReportSummaryKeyFields,
   generateOrderReportSummary,
   getOrderReportSummary,
 } from "@/lib/order-report-summary/summaries";
 import { parseOrderReportSummaryEngine } from "@/lib/order-report-summary/engines";
+import { parseConfirmKeyFieldsBody } from "@/lib/order-report-summary/key-fields";
 import { getEngineConfigError } from "@/lib/order-report-summary/summarize";
 import {
   getSupabaseConfigError,
   isSupabaseConfigured,
 } from "@/lib/supabase/config";
 
-export const maxDuration = 120;
+export const maxDuration = 720;
 
 function supabaseNotConfiguredResponse() {
   return NextResponse.json(
@@ -64,7 +66,7 @@ export async function POST(
     const body = (await request.json()) as { engine?: unknown };
     engine = parseOrderReportSummaryEngine(body.engine);
   } catch {
-    // 빈 body — 기본 엔진(claude) 사용
+    // 빈 body — 기본 엔진(LG엑사원) 사용
   }
 
   const engineError = getEngineConfigError(engine);
@@ -91,6 +93,54 @@ export async function POST(
   }
 
   return NextResponse.json({ summary }, { status: 201 });
+}
+
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ noticeId: string }> },
+) {
+  const session = await getApiSession();
+  if (!session) {
+    return unauthorizedResponse();
+  }
+  if (!isSupabaseConfigured()) {
+    return supabaseNotConfiguredResponse();
+  }
+
+  const { noticeId } = await context.params;
+  const id = noticeId?.trim();
+  if (!id) {
+    return NextResponse.json({ error: "공고 ID가 필요합니다." }, { status: 400 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "요청이 올바르지 않습니다." },
+      { status: 400 },
+    );
+  }
+
+  const { fields, error: parseError } = parseConfirmKeyFieldsBody(body);
+  if (parseError || !fields) {
+    return NextResponse.json(
+      { error: parseError ?? "요청이 올바르지 않습니다." },
+      { status: 400 },
+    );
+  }
+
+  const { summary, error } = await confirmOrderReportSummaryKeyFields(
+    session.id,
+    id,
+    fields,
+  );
+  if (error) {
+    return NextResponse.json({ error, summary }, { status: 400 });
+  }
+
+  return NextResponse.json({ summary });
 }
 
 export async function DELETE(

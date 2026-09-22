@@ -7,6 +7,7 @@ import {
 interface OrderReportScheduleFlowProps {
   steps?: OrderReportSummaryScheduleStep[] | null;
   placeholder?: boolean;
+  className?: string;
 }
 
 function displayDate(value: string, placeholder: boolean): string {
@@ -18,6 +19,7 @@ function displayDate(value: string, placeholder: boolean): string {
 export function OrderReportScheduleFlow({
   steps,
   placeholder = false,
+  className,
 }: OrderReportScheduleFlowProps) {
   const flowSteps = steps?.length
     ? getEffectiveScheduleSteps(steps)
@@ -27,12 +29,12 @@ export function OrderReportScheduleFlow({
 
   if (flowSteps.length === 0 && !placeholder) {
     return (
-      <p className="mt-4 text-sm text-slate-300">미기재</p>
+      <p className={`text-sm text-slate-300 ${className ?? "mt-4"}`}>미기재</p>
     );
   }
 
   return (
-    <div className="mt-4 flex items-stretch">
+    <div className={`flex items-stretch ${className ?? "mt-4"}`}>
       {flowSteps.map((step, index) => (
         <div key={`${step.단계}-${index}`} className="flex min-w-0 flex-1 items-stretch">
           {index > 0 ? (

@@ -1,11 +1,12 @@
 import type { OrderReportSummaryStatus } from "@/lib/order-report-summary/sections";
-import { formatQualificationCriteria } from "@/lib/order-report-summary/qualification-format";
+import { formatQualificationCriteria, sortAndRefineQualificationRows } from "@/lib/order-report-summary/qualification-format";
 import { normalizeKoreanSummaryText } from "@/lib/order-report-summary/korean-spacing";
 import {
   sanitizeMultilineSummaryText,
   sanitizeSummaryText,
 } from "@/lib/order-report-summary/text-sanitize";
 import { normalizeMonetaryAmount } from "@/lib/order-report-summary/text-hints";
+import { extractProjectCategoryFromTitle } from "@/lib/order-report-summary/project-category";
 
 /** 공사개요 내 중첩 표 (대상설비·설비현황·공사범위·투입인력 등) */
 export interface OrderReportSummarySubTable {
@@ -18,6 +19,7 @@ export interface OrderReportSummarySubTable {
 export interface OrderReportSummaryOverviewRow {
   공사명: string;
   발주자: string;
+  입찰방법: string;
   기초금액: string;
   공사기간: string;
   공사내용: string;
@@ -47,6 +49,8 @@ export interface OrderReportSummaryData {
   공고명: string;
   공고번호: string;
   생성일시: string;
+  /** 공사명에서 추출한 분류 (기계설비·전기·용역 등) */
+  분류: string;
   공사개요: OrderReportSummaryOverviewRow[];
   주요일정: OrderReportSummaryScheduleStep[];
   신청자격: OrderReportSummaryQualificationRow[];
@@ -65,6 +69,14 @@ export interface OrderReportPqAutoSummary {
   분석파일: string[];
 }
 
+export interface OrderReportKeyFieldsConfirmation {
+  분류: string;
+  추정가격: string;
+  예비가격기초금액: string;
+  입찰일정: OrderReportSummaryScheduleStep[];
+  confirmedAt: string;
+}
+
 export interface OrderReportSummaryBundle {
   version: 2;
   입찰공고문: OrderReportSummaryData | null;
@@ -73,6 +85,8 @@ export interface OrderReportSummaryBundle {
   분석제외: string[];
   입찰공고문분석파일?: string[];
   pq분석파일?: string[];
+  /** 사용자가 확인한 분류·추정가격·예비가격기초금액·입찰 일정 */
+  확인항목?: OrderReportKeyFieldsConfirmation | null;
 }
 
 export interface OrderReportSummaryRecord {
@@ -91,6 +105,7 @@ export interface OrderReportSummaryRecord {
   updatedAt: string | null;
   pqHasPq: boolean | null;
   pqSubmissionDate: string | null;
+  keyFieldsConfirmation: OrderReportKeyFieldsConfirmation | null;
 }
 
 export const EMPTY_SUMMARY_VALUE = "미기재";
@@ -102,10 +117,12 @@ export function emptyOrderReportSummaryData(): OrderReportSummaryData {
     공고명: empty,
     공고번호: empty,
     생성일시: empty,
+    분류: empty,
     공사개요: [
       {
         공사명: empty,
         발주자: empty,
+        입찰방법: empty,
         기초금액: empty,
         공사기간: empty,
         공사내용: empty,
@@ -205,6 +222,7 @@ function normalizeOverviewRow(
   return {
     공사명: normalizeSummaryField(row.공사명),
     발주자: normalizeSummaryField(row.발주자),
+    입찰방법: normalizeSummaryField(row.입찰방법),
     기초금액: normalizeFinancialSummaryField(
       normalizeSummaryField(row.기초금액),
     ),
@@ -223,6 +241,31 @@ function normalizeScheduleStep(raw: unknown): OrderReportSummaryScheduleStep {
   return {
     날짜: normalizeSummaryField(row.날짜),
     단계: normalizeSummaryField(row.단계),
+  };
+}
+
+export function parseOrderReportKeyFieldsConfirmation(
+  raw: unknown,
+): OrderReportKeyFieldsConfirmation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Record<string, unknown>;
+  const confirmedAt =
+    typeof data.confirmedAt === "string" ? data.confirmedAt.trim() : "";
+  if (!confirmedAt) return null;
+
+  const schedule = Array.isArray(data.입찰일정)
+    ? data.입찰일정.map(normalizeScheduleStep)
+    : [];
+
+  return {
+    추정가격: normalizeSummaryField(data.추정가격),
+    예비가격기초금액: normalizeSummaryField(data.예비가격기초금액),
+    분류:
+      typeof data.분류 === "string"
+        ? normalizeSummaryField(data.분류)
+        : "",
+    입찰일정: schedule,
+    confirmedAt,
   };
 }
 
@@ -354,10 +397,12 @@ function migrateLegacySummaryData(
     공고명: empty.공고명,
     공고번호: empty.공고번호,
     생성일시: empty.생성일시,
+    분류: EMPTY_SUMMARY_VALUE,
     공사개요: [
       {
         공사명: EMPTY_SUMMARY_VALUE,
         발주자: EMPTY_SUMMARY_VALUE,
+        입찰방법: EMPTY_SUMMARY_VALUE,
         기초금액: baseAmount,
         공사기간: normalizeSummaryField(overview.constructionPeriod),
         공사내용: scope !== EMPTY_SUMMARY_VALUE ? scope : EMPTY_SUMMARY_VALUE,
@@ -367,7 +412,9 @@ function migrateLegacySummaryData(
     ],
     주요일정: scheduleSteps.length > 0 ? scheduleSteps : empty.주요일정,
     신청자격:
-      qualificationRows.length > 0 ? qualificationRows : empty.신청자격,
+      qualificationRows.length > 0
+        ? sortAndRefineQualificationRows(qualificationRows)
+        : empty.신청자격,
     담당자: [
       {
         구분: "담당자",
@@ -460,6 +507,7 @@ export function buildOrderReportSummaryBundle(options: {
   excluded?: string[];
   bidNoticeSourceFiles?: string[];
   pqSourceFiles?: string[];
+  keyFieldsConfirmation?: OrderReportKeyFieldsConfirmation | null;
 }): OrderReportSummaryBundle {
   return {
     version: 2,
@@ -468,6 +516,7 @@ export function buildOrderReportSummaryBundle(options: {
     분석제외: options.excluded ?? [],
     입찰공고문분석파일: options.bidNoticeSourceFiles ?? [],
     pq분석파일: options.pqSourceFiles ?? [],
+    확인항목: options.keyFieldsConfirmation ?? null,
   };
 }
 
@@ -512,6 +561,7 @@ export function parseOrderReportSummaryBundle(
       분석제외: excluded,
       입찰공고문분석파일: bidNoticeSourceFiles,
       pq분석파일: pqSourceFiles,
+      확인항목: parseOrderReportKeyFieldsConfirmation(data.확인항목),
     };
   }
 
@@ -553,27 +603,70 @@ export function parseOrderReportSummaryData(raw: unknown): OrderReportSummaryDat
     ? data.신청자격.map(normalizeQualificationRow)
     : [];
 
+  const 공고명 = normalizeSummaryField(data.공고명);
+  const 공사개요 = overviewRows.length > 0 ? overviewRows : empty.공사개요;
+  const extractedCategory = extractProjectCategoryFromTitle(
+    ...공사개요.map((row) => row.공사명),
+    공고명,
+  );
+  const 분류 =
+    data.분류 != null
+      ? normalizeSummaryField(data.분류)
+      : extractedCategory || EMPTY_SUMMARY_VALUE;
+
   return {
     발주기관: normalizeSummaryField(data.발주기관),
-    공고명: normalizeSummaryField(data.공고명),
+    공고명,
     공고번호: normalizeSummaryField(data.공고번호),
     생성일시: normalizeSummaryField(data.생성일시),
-    공사개요: overviewRows.length > 0 ? overviewRows : empty.공사개요,
+    분류,
+    공사개요,
     주요일정: scheduleSteps,
-    신청자격: qualificationRows,
+    신청자격: sortAndRefineQualificationRows(qualificationRows),
     담당자: normalizeContacts(data.담당자),
   };
 }
 
 export function enrichSummaryWithNoticeMetadata(
   summary: OrderReportSummaryData,
-  notice: { title: string; notice_no: string },
+  notice: {
+    title: string;
+    notice_no: string;
+    khnp_bid_open?:
+      | { bid_method?: string | null }
+      | Array<{ bid_method?: string | null }>
+      | null;
+  },
   generatedAt: Date,
 ): OrderReportSummaryData {
+  const open = Array.isArray(notice.khnp_bid_open)
+    ? notice.khnp_bid_open[0]
+    : notice.khnp_bid_open;
+  const noticeBidMethod = open?.bid_method?.trim() ?? "";
+  const extractedCategory = extractProjectCategoryFromTitle(
+    ...summary.공사개요.map((row) => row.공사명),
+    notice.title,
+    summary.공고명,
+  );
+  const hasCategory =
+    summary.분류 &&
+    summary.분류 !== EMPTY_SUMMARY_VALUE &&
+    summary.분류 !== "—";
+
   return {
     ...summary,
     공고명: notice.title || summary.공고명,
     공고번호: notice.notice_no || summary.공고번호,
     생성일시: generatedAt.toLocaleString("ko-KR"),
+    분류: hasCategory ? summary.분류 : extractedCategory || EMPTY_SUMMARY_VALUE,
+    공사개요: summary.공사개요.map((row, index) => {
+      if (index > 0) return row;
+      const hasMethod =
+        row.입찰방법 &&
+        row.입찰방법 !== EMPTY_SUMMARY_VALUE &&
+        row.입찰방법 !== "—";
+      if (hasMethod || !noticeBidMethod) return row;
+      return { ...row, 입찰방법: noticeBidMethod };
+    }),
   };
 }

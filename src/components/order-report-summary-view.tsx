@@ -18,12 +18,14 @@ import {
   type OrderReportSummaryStatus,
 } from "@/lib/order-report-summary/sections";
 import {
+  DEFAULT_ORDER_REPORT_SUMMARY_ENGINE,
   ORDER_REPORT_SUMMARY_ENGINE_LABELS,
   type OrderReportSummaryEngine,
 } from "@/lib/order-report-summary/engines";
 import { OrderReportQualificationTable } from "@/components/order-report-qualification-table";
 import { OrderReportOverviewSection } from "@/components/order-report-overview-section";
 import { OrderReportScheduleFlow } from "@/components/order-report-schedule-flow";
+import { OrderReportKeyFieldsReview } from "@/components/order-report-key-fields-review";
 import {
   buildSummaryPreviewSections,
   type SummaryPreviewSection,
@@ -75,7 +77,7 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
   const [generationPhase, setGenerationPhase] =
     useState<OrderReportSummaryGenerationPhase | null>(null);
   const [selectedEngine, setSelectedEngine] =
-    useState<OrderReportSummaryEngine>("claude");
+    useState<OrderReportSummaryEngine>(DEFAULT_ORDER_REPORT_SUMMARY_ENGINE);
   const [availableEngines, setAvailableEngines] = useState<
     Array<{ id: OrderReportSummaryEngine; label: string; configured: boolean }>
   >([]);
@@ -152,7 +154,13 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
       const engines = enginesData.engines ?? [];
       setAvailableEngines(engines);
       const defaultEngine =
-        engines.find((engine) => engine.configured)?.id ?? "claude";
+        engines.find(
+          (engine) =>
+            engine.id === DEFAULT_ORDER_REPORT_SUMMARY_ENGINE &&
+            engine.configured,
+        )?.id ??
+        engines.find((engine) => engine.configured)?.id ??
+        DEFAULT_ORDER_REPORT_SUMMARY_ENGINE;
       setSelectedEngine(defaultEngine);
 
       if (!summaryRes.ok && summaryData.error) {
@@ -289,6 +297,7 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
             excludedFiles: [],
             bidNoticeSourceFiles: [],
             pqSourceFiles: [],
+            keyFieldsConfirmation: null,
           },
     );
     let responseData: {
@@ -414,7 +423,13 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
     pqHasPq: summaryRecord?.pqHasPq ?? null,
     pqSubmissionDate: summaryRecord?.pqSubmissionDate ?? null,
     summary: summaryRecord?.summary ?? null,
+    keyFieldsConfirmed: Boolean(
+      summaryRecord?.keyFieldsConfirmation?.confirmedAt,
+    ),
   });
+  const keyFieldsConfirmed = Boolean(
+    summaryRecord?.keyFieldsConfirmation?.confirmedAt,
+  );
 
   return (
     <div className="relative space-y-6">
@@ -508,6 +523,22 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
                   </span>
                 </dd>
               </div>
+              {hasBidNoticeSummary ? (
+                <div>
+                  <dt className="text-slate-500">중요 항목</dt>
+                  <dd>
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                        keyFieldsConfirmed
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-amber-200 bg-amber-50 text-amber-800"
+                      }`}
+                    >
+                      {keyFieldsConfirmed ? "확인 완료" : "확인 필요"}
+                    </span>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           </div>
 
@@ -589,6 +620,23 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
             : null}
         </p>
       </section>
+
+      {hasBidNoticeSummary && summaryRecord?.summary ? (
+        <div
+          className={`transition-opacity ${
+            isGenerating ? "pointer-events-none opacity-60" : ""
+          }`}
+        >
+          <OrderReportKeyFieldsReview
+            noticeId={noticeId}
+            summary={summaryRecord.summary}
+            confirmation={summaryRecord.keyFieldsConfirmation}
+            noticeTitle={notice.title}
+            disabled={isBusy}
+            onConfirmed={setSummaryRecord}
+          />
+        </div>
+      ) : null}
 
       <section
         className={`rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-opacity ${
@@ -728,12 +776,23 @@ export function OrderReportSummaryView({ noticeId }: OrderReportSummaryViewProps
                   <p className="mt-1 text-xs text-slate-500">{section.description}</p>
                 </header>
                 {section.id === "project_name" ? (
-                  <p className="mt-4 text-lg font-bold text-slate-900">
-                    {section.projectName ||
-                      (showBidNoticePlaceholders
-                        ? "요약 생성 후 표시됩니다"
-                        : "미기재")}
-                  </p>
+                  <div className="mt-4 space-y-3">
+                    <p className="text-lg font-bold text-slate-900">
+                      {section.projectName ||
+                        (showBidNoticePlaceholders
+                          ? "요약 생성 후 표시됩니다"
+                          : "미기재")}
+                    </p>
+                    <p className="flex gap-3 text-sm">
+                      <span className="w-28 shrink-0 text-slate-500">분류</span>
+                      <span className="text-slate-800">
+                        {section.projectCategory ||
+                          (showBidNoticePlaceholders
+                            ? "요약 생성 후 표시됩니다"
+                            : "미기재")}
+                      </span>
+                    </p>
+                  </div>
                 ) : section.id === "overview" ? (
                   section.rows.length > 0 ||
                   (section.subTables?.length ?? 0) > 0 ||

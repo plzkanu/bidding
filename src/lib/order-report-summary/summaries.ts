@@ -6,7 +6,10 @@ import {
 } from "@/lib/bid-notices/attachments";
 import { isNoticeOrderReported } from "@/lib/bid-notices/order-reports";
 import { getKhnpBidNoticeById } from "@/lib/bid-notices/khnp";
-import type { OrderReportSummaryEngine } from "@/lib/order-report-summary/engines";
+import {
+  DEFAULT_ORDER_REPORT_SUMMARY_ENGINE,
+  type OrderReportSummaryEngine,
+} from "@/lib/order-report-summary/engines";
 import {
   categorizeSummaryAttachments,
   SUMMARY_ATTACHMENT_FILTER_HINT,
@@ -40,6 +43,11 @@ import {
   setSummaryAttachmentStatus,
   setSummaryProgressPhase,
 } from "@/lib/order-report-summary/summary-progress";
+import {
+  applyKeyFieldsToSummary,
+  toKeyFieldsConfirmation,
+  type OrderReportKeyFieldsInput,
+} from "@/lib/order-report-summary/key-fields";
 import {
   buildOrderReportSummaryBundle,
   parseOrderReportSummaryBundle,
@@ -147,6 +155,7 @@ function mapSummaryRow(
       updatedAt: null,
       pqHasPq: null,
       pqSubmissionDate: null,
+      keyFieldsConfirmation: null,
     };
   }
 
@@ -172,6 +181,7 @@ function mapSummaryRow(
     updatedAt: row.updated_at,
     pqHasPq: (row.pq_has_pq as boolean | null | undefined) ?? null,
     pqSubmissionDate: (row.pq_submission_date as string | null | undefined) ?? null,
+    keyFieldsConfirmation: bundle?.확인항목 ?? null,
   };
 }
 
@@ -268,7 +278,7 @@ export async function cancelOrderReportSummary(
 export async function generateOrderReportSummary(
   userId: string,
   noticeId: string,
-  engine: OrderReportSummaryEngine = "claude",
+  engine: OrderReportSummaryEngine = DEFAULT_ORDER_REPORT_SUMMARY_ENGINE,
 ): Promise<{
   summary: OrderReportSummaryRecord;
   error: string | null;
@@ -608,6 +618,144 @@ export async function getOrderReportSummaryDocx(
   }
 }
 
+export async function confirmOrderReportSummaryKeyFields(
+  userId: string,
+  noticeId: string,
+  fields: OrderReportKeyFieldsInput,
+): Promise<{ summary: OrderReportSummaryRecord; error: string | null }> {
+  const configError = supabaseNotReadyError();
+  if (configError) {
+    return { summary: mapSummaryRow(noticeId, null), error: configError };
+  }
+
+  const { isOrderReported, error: reportError } = await isNoticeOrderReported(
+    userId,
+    noticeId,
+  );
+  if (reportError) {
+    return { summary: mapSummaryRow(noticeId, null), error: reportError };
+  }
+  if (!isOrderReported) {
+    return {
+      summary: mapSummaryRow(noticeId, null),
+      error: "발주보고가 등록되지 않은 공고입니다.",
+    };
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from("user_order_report_summaries")
+      .select(
+        "status, summary_json, docx_file_name, error_message, model_version, generated_at, updated_at, pq_has_pq, pq_submission_date",
+      )
+      .eq("user_id", userId)
+      .eq("notice_id", noticeId)
+      .maybeSingle();
+
+    if (error) {
+      return {
+        summary: mapSummaryRow(noticeId, null),
+        error: normalizeSummariesError(error.message),
+      };
+    }
+
+    const current = mapSummaryRow(noticeId, data);
+    if (current.status !== "COMPLETED" || !current.summary) {
+      return {
+        summary: current,
+        error: "요약을 생성한 뒤 중요 항목을 확인할 수 있습니다.",
+      };
+    }
+
+    const { notice, error: noticeError } = await getKhnpBidNoticeById(noticeId);
+    if (noticeError) {
+      return { summary: current, error: noticeError };
+    }
+    if (!notice) {
+      return { summary: current, error: "공고를 찾을 수 없습니다." };
+    }
+
+    const confirmedAt = new Date();
+    const confirmation = toKeyFieldsConfirmation(fields, confirmedAt);
+    const updatedSummary = applyKeyFieldsToSummary(current.summary, fields);
+    const summaryBundle = buildOrderReportSummaryBundle({
+      bidNotice: updatedSummary,
+      pq: current.pqSummary,
+      excluded: current.excludedFiles,
+      bidNoticeSourceFiles: current.bidNoticeSourceFiles,
+      pqSourceFiles: current.pqSourceFiles,
+      keyFieldsConfirmation: confirmation,
+    });
+
+    const generatedAt = current.generatedAt
+      ? new Date(current.generatedAt)
+      : confirmedAt;
+    const docxFileName =
+      current.docxFileName ?? buildOrderReportSummaryDocxFileName(notice);
+    const docxBuffer = await buildOrderReportSummaryDocx(
+      notice,
+      updatedSummary,
+      Number.isNaN(generatedAt.getTime()) ? confirmedAt : generatedAt,
+      {
+        pqSummary: current.pqSummary,
+        bidNoticeSourceFiles: current.bidNoticeSourceFiles,
+        pqSourceFiles: current.pqSourceFiles,
+      },
+    );
+
+    const storagePath = buildStoragePath(userId, noticeId);
+    const { error: uploadError } = await supabase.storage
+      .from(SUMMARIES_BUCKET)
+      .upload(storagePath, docxBuffer, {
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return {
+        summary: current,
+        error: normalizeSummariesError(uploadError.message),
+      };
+    }
+
+    const pqResult = extractPqFromSummary(updatedSummary);
+    const updatedAtIso = confirmedAt.toISOString();
+    const { error: saveError } = await supabase
+      .from("user_order_report_summaries")
+      .update({
+        summary_json: summaryBundle,
+        storage_path: storagePath,
+        docx_file_name: docxFileName,
+        updated_at: updatedAtIso,
+        pq_has_pq: pqResult.hasPq,
+        pq_submission_date: pqResult.submissionDate,
+      })
+      .eq("user_id", userId)
+      .eq("notice_id", noticeId);
+
+    if (saveError) {
+      return {
+        summary: current,
+        error: normalizeSummariesError(saveError.message),
+      };
+    }
+
+    const { summary: record } = await getOrderReportSummary(userId, noticeId);
+    return { summary: record, error: null };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "중요 항목 확인 저장에 실패했습니다.";
+    return {
+      summary: mapSummaryRow(noticeId, null),
+      error: normalizeSummariesError(message),
+    };
+  }
+}
+
 export async function getSummaryStatusByNoticeIds(
   userId: string,
   noticeIds: string[],
@@ -677,6 +825,9 @@ export async function getOrderReportListMetaByNoticeIds(
         pqSubmissionDate:
           (row.pq_submission_date as string | null | undefined) ?? null,
         summary: bundle?.입찰공고문 ?? null,
+        keyFieldsConfirmed: bundle?.입찰공고문
+          ? Boolean(bundle.확인항목?.confirmedAt)
+          : null,
       });
     }
 

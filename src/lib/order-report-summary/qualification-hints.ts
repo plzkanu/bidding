@@ -1,6 +1,6 @@
 /** 첨부 텍스트에서 신청자격·참가제한 조항 추출 (LLM 보조·후처리) */
 
-import { formatQualificationCriteria } from "@/lib/order-report-summary/qualification-format";
+import { formatQualificationCriteria, sortAndRefineQualificationRows } from "@/lib/order-report-summary/qualification-format";
 import { preprocessAttachmentTextForHints } from "@/lib/order-report-summary/text-hints";
 import { sanitizeMultilineSummaryText } from "@/lib/order-report-summary/text-sanitize";
 import type {
@@ -338,6 +338,7 @@ export function buildQualificationHintPromptBlock(
     "아래는 원문에서 찾은 참가자격·제한 조항입니다. 조건은 빠짐없이 반영하되, 각 조항은 **한 줄로 요약**하세요.",
     "- 면허명·등급·금액·기간·건수·허용/불허는 유지",
     "- 법령 조문 전문, 보안규정 전문, 서문(다음 각 호의...)은 쓰지 말 것",
+    "- 기타는 맨 마지막, 실무 유의사항만 짧게. 담합·조세포탈은 참가제한",
     "- 각 조항은 한 줄씩 \\n 으로 구분",
     ...sections,
   ].join("\n");
@@ -410,8 +411,10 @@ export function applyQualificationHints(
     });
   }
 
-  const 신청자격 = [...mergedByCategory.values()].filter(
-    (row) => splitCriteriaLines(row.기준).length > 0,
+  const 신청자격 = sortAndRefineQualificationRows(
+    [...mergedByCategory.values()].filter(
+      (row) => splitCriteriaLines(row.기준).length > 0,
+    ),
   );
 
   return {

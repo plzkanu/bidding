@@ -160,12 +160,12 @@ export function OrderReportSummaryProgress({
         : "발주요약 생성 중입니다";
 
   const description = isCompleted
-    ? "발주요약 생성이 완료되었습니다. 아래 미리보기와 DOCX 다운로드를 확인하세요."
+    ? "발주요약 생성이 완료되었습니다. 아래 중요 항목을 확인한 뒤 미리보기와 DOCX를 검토하세요."
     : isCancelled
       ? "요약 생성을 중단했습니다. 필요하면 다시 요약 생성을 눌러 주세요."
       : isFailed
         ? "요약 생성 중 오류가 발생했습니다. 오류 메시지를 확인한 뒤 다시 시도해 주세요."
-        : "첨부파일 분석과 AI 요약에 1~3분 정도 걸릴 수 있습니다. 완료 전에는 다른 화면으로 이동할 수 없습니다.";
+        : "모델 준비와 AI 요약에 수 분이 걸릴 수 있습니다. 오른쪽 작업시간이 흐르는 동안 잠시 기다려 주세요.";
 
   return (
     <div
@@ -207,7 +207,7 @@ export function OrderReportSummaryProgress({
             {formatElapsed(elapsed)}
           </p>
           <p>
-            {isCompleted || isFailed || isCancelled ? "소요 시간" : "경과 시간"}
+            {isCompleted || isFailed || isCancelled ? "소요 시간" : "작업시간"}
           </p>
         </div>
       </div>

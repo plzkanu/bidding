@@ -61,7 +61,7 @@ export function OrderReportOverviewSection({
                         {cells.map((cell, cellIndex) => (
                           <td
                             key={cellIndex}
-                            className="border border-[#BFBFBF] px-2 py-2 text-center align-top whitespace-pre-wrap text-slate-800"
+                            className="border border-[#BFBFBF] px-2 py-2 text-left align-top break-words whitespace-pre-wrap text-slate-800"
                           >
                             {cell}
                           </td>

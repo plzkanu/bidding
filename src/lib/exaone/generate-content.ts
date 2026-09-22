@@ -21,9 +21,7 @@ export async function generateExaoneJsonContent(params: {
     response_format: { type: "json_object" },
   };
 
-  if (model.toUpperCase().includes("EXAONE")) {
-    request.chat_template_kwargs = { enable_thinking: false };
-  }
+  request.chat_template_kwargs = { enable_thinking: false };
 
   const responseBody = await callExaoneChatCompletions(
     request,

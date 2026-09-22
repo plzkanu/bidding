@@ -1,14 +1,17 @@
-export const ORDER_REPORT_SUMMARY_ENGINES = ["claude", "exaone"] as const;
+export const ORDER_REPORT_SUMMARY_ENGINES = ["exaone", "claude"] as const;
 
 export type OrderReportSummaryEngine =
   (typeof ORDER_REPORT_SUMMARY_ENGINES)[number];
+
+export const DEFAULT_ORDER_REPORT_SUMMARY_ENGINE: OrderReportSummaryEngine =
+  "exaone";
 
 export const ORDER_REPORT_SUMMARY_ENGINE_LABELS: Record<
   OrderReportSummaryEngine,
   string
 > = {
-  claude: "클로드",
   exaone: "LG엑사원",
+  claude: "클로드",
 };
 
 export function isOrderReportSummaryEngine(
@@ -26,5 +29,5 @@ export function parseOrderReportSummaryEngine(
   if (isOrderReportSummaryEngine(value)) {
     return value;
   }
-  return "claude";
+  return DEFAULT_ORDER_REPORT_SUMMARY_ENGINE;
 }

@@ -52,13 +52,15 @@ import type {
 
 import {
   dedupeOverviewFinancialFields,
-  formatOverviewBaseAmountForDocx,
   hasDisplayableSummaryValue,
+  partitionOverviewRemarks,
+  toOverviewBaseAmountRow,
 } from "@/lib/order-report-summary/overview-display";
 import { normalizeScheduleFlowSteps, getEffectiveScheduleSteps } from "@/lib/order-report-summary/schedule-flow";
 import { sanitizeMultilineSummaryText } from "@/lib/order-report-summary/text-sanitize";
-import { splitQualificationItems } from "@/lib/order-report-summary/qualification-format";
+import { splitQualificationItems, sortAndRefineQualificationRows } from "@/lib/order-report-summary/qualification-format";
 import { EMPTY_SUMMARY_VALUE } from "@/lib/order-report-summary/types";
+import { extractProjectCategoryFromTitle } from "@/lib/order-report-summary/project-category";
 
 
 
@@ -420,9 +422,29 @@ function buildSampleOverviewTable(
     overviewRows.push({ label: "발주자", value: orderer });
   }
 
-  const amount = formatOverviewBaseAmountForDocx(row.기초금액);
-  if (amount) {
-    overviewRows.push({ label: "기초금액", value: amount });
+  if (hasDisplayableSummaryValue(row.입찰방법)) {
+    overviewRows.push({ label: "입찰방법", value: row.입찰방법 });
+  }
+
+  const remarks = partitionOverviewRemarks(row.비고);
+  const estimatedRows = remarks.rows.filter(
+    (item) => /추정\s*가격|추정가/.test(item.label) && !/기초/.test(item.label),
+  );
+  const otherRemarkRows = remarks.rows.filter(
+    (item) => !(/추정\s*가격|추정가/.test(item.label) && !/기초/.test(item.label)),
+  );
+
+  for (const item of estimatedRows) {
+    overviewRows.push({ label: item.label, value: item.value });
+  }
+
+  const amountRow = toOverviewBaseAmountRow(row.기초금액);
+  if (amountRow) {
+    overviewRows.push({ label: amountRow.label, value: amountRow.value });
+  }
+
+  for (const item of otherRemarkRows) {
+    overviewRows.push({ label: item.label, value: item.value });
   }
 
   if (hasDisplayableSummaryValue(row.공사기간)) {
@@ -494,8 +516,8 @@ function buildSampleOverviewTable(
 
   const children: FileChild[] = [table];
 
-  if (hasDisplayableSummaryValue(row.비고)) {
-    children.push(...footnoteParagraphs(row.비고));
+  if (hasDisplayableSummaryValue(remarks.footnotes)) {
+    children.push(...footnoteParagraphs(remarks.footnotes));
   }
 
   return children;
@@ -518,6 +540,23 @@ function buildBidNoticeSampleSections(
         ? projectName
         : EMPTY_SUMMARY_VALUE,
     ),
+  );
+  const projectCategory = hasDisplayableSummaryValue(summary.분류)
+    ? summary.분류
+    : extractProjectCategoryFromTitle(
+        ...overviewRows.map((row) => row.공사명),
+        summary.공고명,
+        projectName,
+      );
+  children.push(
+    buildLabelValueTable([
+      {
+        label: "분류",
+        value: hasDisplayableSummaryValue(projectCategory)
+          ? projectCategory
+          : EMPTY_SUMMARY_VALUE,
+      },
+    ]),
   );
 
   children.push(romanSectionHeading("II", "공사개요"));
@@ -796,7 +835,7 @@ function buildQualificationTable(
 ): Table {
   const effectiveRows =
     rows.length > 0
-      ? rows
+      ? sortAndRefineQualificationRows(rows)
       : [{ 구분: EMPTY_SUMMARY_VALUE, 기준: EMPTY_SUMMARY_VALUE }];
 
   const headerRow = new TableRow({

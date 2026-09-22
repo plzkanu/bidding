@@ -4,6 +4,7 @@ import type { OrderReportSummaryData } from "@/lib/order-report-summary/types";
 import {
   dedupeOverviewFinancialFields,
   extractNumericWonAmount,
+  hasDisplayableSummaryValue,
   parseLabelValueLine,
 } from "@/lib/order-report-summary/overview-display";
 
@@ -46,6 +47,29 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function compactSpacedHangul(text: string): string {
+  return text.replace(/(?:[가-힣][ \t]+)+[가-힣]/g, (run) =>
+    run.replace(/[ \t]+/g, ""),
+  );
+}
+
+function flexibleKoreanLabel(label: string): string {
+  return [...label]
+    .map((char) => (/[가-힣]/.test(char) ? `${char}\\s*` : escapeRegExp(char)))
+    .join("");
+}
+
+function labelSearchPattern(label: string): string {
+  const flex = flexibleKoreanLabel(label);
+  if (label === "추정가격" || label === "추정가" || label === "추정 금액") {
+    return `${flex}(?!\\s*기초)`;
+  }
+  if (label === "기초금액" || label === "기초금") {
+    return `(?<![가-힣])${flex}`;
+  }
+  return flex;
+}
+
 /** HWP 추출 텍스트 정규화 (통화·공백·표 TSV) */
 export function normalizeCurrencyInText(text: string): string {
   return text
@@ -57,7 +81,7 @@ export function normalizeCurrencyInText(text: string): string {
 
 /** 표 TSV·분리된 줄을 `항목 : 금액` 형태로 보강 */
 export function preprocessAttachmentTextForHints(text: string): string {
-  const normalized = normalizeCurrencyInText(text);
+  const normalized = compactSpacedHangul(normalizeCurrencyInText(text));
   const lines = normalized.split("\n");
   const extra: string[] = [];
 
@@ -152,7 +176,7 @@ function tryMatchLabeledAmount(
   text: string,
   label: string,
 ): { label: string; amount: string } | null {
-  const escaped = escapeRegExp(label);
+  const escaped = labelSearchPattern(label);
 
   const patterns = [
     // · 추정가격 : ₩376,662,482- (부가가치세 별도)
@@ -290,8 +314,9 @@ export function buildFinancialHintPromptBlock(
   return [
     "=== 첨부 텍스트 자동 추출 힌트 (표·본문 정규식) ===",
     "아래는 원문에서 찾은 금액입니다. **원문 항목명: 금액** 형식으로 공사개요에 반영하세요.",
-    "- 대표 금액 1건 → 공사개요[].기초금액",
-    "- 그 외 금액 → 공사개요[].비고 (줄마다 원문항목명: 금액)",
+    "- 예비가격기초금액 → 공사개요[].기초금액 (항목명: 금액)",
+    "- 추정가격 → 공사개요[].비고 (추정가격: 금액)",
+    "- 입찰방법·입찰방식도 공사개요[].입찰방법에 반영",
     "- 힌트에 없는 금액 항목은 문서에 없는 것으로 간주 (임의 생성 금지)",
     "[금융 정보]",
     ...lines.map((line) => `  * ${line.replace(/^- /, "")}`),
@@ -445,6 +470,59 @@ export function applyFinancialHints(
   });
 
   return { ...summary, 공사개요 };
+}
+
+const BID_METHOD_LABELS = ["입찰방법", "입찰방식", "계약방법"] as const;
+
+export function extractBidMethodFromText(text: string): string | null {
+  if (!text.trim()) return null;
+  const processed = preprocessAttachmentTextForHints(text);
+
+  for (const label of BID_METHOD_LABELS) {
+    const flex = flexibleKoreanLabel(label);
+    const patterns = [
+      new RegExp(`${flex}\\s*[:：]\\s*([^\\n]{2,60})`, "u"),
+      new RegExp(`${flex}\\t+\\s*([^\\n]{2,60})`, "u"),
+      new RegExp(`${flex}\\s*\\n\\s*([^\\n]{2,60})`, "u"),
+    ];
+
+    for (const pattern of patterns) {
+      const match = processed.match(pattern);
+      const raw = match?.[1]?.replace(/^[·ㆍ○●◦\-•*\s]+/, "").trim() ?? "";
+      if (!raw || raw === "미기재") continue;
+      if (/[0-9]{4,}/.test(raw)) continue;
+      const value = raw.replace(/\s{2,}/g, " ").slice(0, 60);
+      if (value.length >= 2) return value;
+    }
+  }
+
+  return null;
+}
+
+export function extractBidMethodFromTexts(
+  sources: Array<{ fileName: string; text: string }>,
+): string | null {
+  for (const { text } of sources) {
+    const found = extractBidMethodFromText(text);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function applyBidMethodHint(
+  summary: OrderReportSummaryData,
+  bidMethod: string | null,
+): OrderReportSummaryData {
+  if (!bidMethod) return summary;
+
+  return {
+    ...summary,
+    공사개요: summary.공사개요.map((row, index) => {
+      if (index > 0) return row;
+      if (hasDisplayableSummaryValue(row.입찰방법)) return row;
+      return { ...row, 입찰방법: bidMethod };
+    }),
+  };
 }
 
 /** @deprecated applyFinancialHints 사용 */

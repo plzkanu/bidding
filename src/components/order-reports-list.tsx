@@ -25,7 +25,7 @@ const NOTICE_TITLE_COL_CLASS =
   "w-[18rem] max-w-[18rem] px-2 py-1.5 break-words align-middle";
 const DATE_COL_CLASS = LIST_DATETIME_COL_CLASS;
 const DEPT_COL_CLASS = "w-[6rem] truncate px-2 py-1.5";
-const SUMMARY_COL_CLASS = "w-[4.5rem] px-2 py-1.5";
+const SUMMARY_COL_CLASS = "w-[5.5rem] px-2 py-1.5";
 const PQ_COL_CLASS = "w-[7rem] px-2 py-1.5 leading-tight break-words";
 const STATUS_COL_CLASS = "w-[4rem] px-2 py-1.5";
 const ACTION_COL_CLASS = "w-[9.5rem] px-2 py-1.5";
@@ -329,7 +329,21 @@ export function OrderReportsList() {
                       pqLabel: "PQ 분석 전",
                       pqHasPq: null,
                       pqSubmissionDate: null,
+                      keyFieldsConfirmed: null,
                     } satisfies OrderReportPqListMeta);
+                  const summaryStatus =
+                    summaryStatuses[report.noticeId] ?? "NOT_STARTED";
+                  const needsKeyFieldReview =
+                    summaryStatus === "COMPLETED" &&
+                    pqMeta.keyFieldsConfirmed === false;
+                  const summaryLabel = needsKeyFieldReview
+                    ? "확인 필요"
+                    : ORDER_REPORT_SUMMARY_STATUS_LABELS[summaryStatus];
+                  const summaryBadgeClass = needsKeyFieldReview
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : summaryStatus === "COMPLETED"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-500";
 
                   return (
                     <tr
@@ -369,10 +383,10 @@ export function OrderReportsList() {
                         {formatListDateTime(report.submittedAt)}
                       </td>
                       <td className={SUMMARY_COL_CLASS}>
-                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                          {ORDER_REPORT_SUMMARY_STATUS_LABELS[
-                            summaryStatuses[report.noticeId] ?? "NOT_STARTED"
-                          ]}
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${summaryBadgeClass}`}
+                        >
+                          {summaryLabel}
                         </span>
                       </td>
                       <td className={PQ_COL_CLASS}>

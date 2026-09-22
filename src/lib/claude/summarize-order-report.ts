@@ -16,9 +16,11 @@ import {
 import { preprocessTextForGemini } from "@/lib/order-report-summary/gemini-text-preprocess";
 import { ORDER_REPORT_SUMMARY_PROMPT } from "@/lib/order-report-summary/prompt";
 import {
+  applyBidMethodHint,
   applyFinancialHints,
   buildFinancialHintPromptBlock,
   extractBaseAmountHintsFromTexts,
+  extractBidMethodFromTexts,
   extractEstimatedPriceHintsFromTexts,
 } from "@/lib/order-report-summary/text-hints";
 import {
@@ -61,7 +63,9 @@ const CLAUDE_INLINE_MAX_BYTES = 20 * 1024 * 1024;
 
 const JSON_OUTPUT_INSTRUCTION = `위 문서를 분석하여 반드시 순수 JSON만 출력하세요.
 마크다운 코드블록(\`\`\`), 설명 텍스트, 추론 과정 없이 JSON 객체만 반환하세요.
-출력 형식은 system 프롬프트의 "출력 JSON 구조"를 따르세요.`;
+출력 형식은 system 프롬프트의 "출력 JSON 구조"를 따르세요.
+공사개요 표 셀·공사내용·공사기간·자격기준·비고에는 말줄임표(...)를 쓰지 말고 문서 원문 전체를 기입하세요.
+출력 JSON 구조의 예시 값을 그대로 복사하지 마세요.`;
 
 const BATCH_MERGE_INSTRUCTION = `이전에 추출한 JSON과 이번에 추가된 PDF 페이지를 함께 분석하세요.
 누락된 필드를 보완하고 더 정확한 값이 있으면 갱신한 뒤, system 프롬프트의 출력 JSON 구조에 맞는 완전한 JSON만 출력하세요.
@@ -389,10 +393,14 @@ export async function summarizeOrderReportWithClaude(
 
   const baseAmountHints = extractBaseAmountHintsFromTexts(plainTexts);
   const estimatedPriceHints = extractEstimatedPriceHintsFromTexts(plainTexts);
+  const bidMethodHint = extractBidMethodFromTexts(plainTexts);
   const qualificationHints = extractQualificationHintsFromTexts(plainTexts);
   const contactHints = extractContactHintsFromTexts(plainTexts);
   const hintBlock = [
     buildFinancialHintPromptBlock(baseAmountHints, estimatedPriceHints),
+    bidMethodHint
+      ? `=== 첨부 텍스트 자동 추출 힌트 (입찰방법) ===\n- 입찰방법: ${bidMethodHint}\n공사개요[].입찰방법에 원문 그대로 반영하세요.`
+      : "",
     buildQualificationHintPromptBlock(qualificationHints),
     buildContactHintPromptBlock(contactHints),
   ]
@@ -481,16 +489,19 @@ export async function summarizeOrderReportWithClaude(
 
   const generatedAt = new Date();
   const summary = enrichSummaryWithNoticeMetadata(
-    applyContactHints(
-      applyQualificationHints(
-        applyFinancialHints(
-          parseOrderReportSummaryData(parsed),
-          baseAmountHints,
-          estimatedPriceHints,
+    applyBidMethodHint(
+      applyContactHints(
+        applyQualificationHints(
+          applyFinancialHints(
+            parseOrderReportSummaryData(parsed),
+            baseAmountHints,
+            estimatedPriceHints,
+          ),
+          qualificationHints,
         ),
-        qualificationHints,
+        contactHints,
       ),
-      contactHints,
+      bidMethodHint,
     ),
     input.notice,
     generatedAt,

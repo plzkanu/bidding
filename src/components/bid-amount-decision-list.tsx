@@ -137,7 +137,7 @@ export function BidAmountDecisionList() {
     <div>
       <p className="text-sm text-slate-600">
         발주보고에서 「보고 완료」한 공고만 표시됩니다. 「투찰 금액」에서
-        투찰금액을 입력·확정합니다.
+        발주요약 양식을 확인하고 투찰가격을 입력합니다.
       </p>
 
       {error ? (

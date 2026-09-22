@@ -57,6 +57,7 @@ export interface OrderReportPqListMeta {
   pqLabel: string;
   pqHasPq: boolean | null;
   pqSubmissionDate: string | null;
+  keyFieldsConfirmed: boolean | null;
 }
 
 export function resolvePqListMeta(options: {
@@ -64,6 +65,7 @@ export function resolvePqListMeta(options: {
   pqHasPq?: boolean | null;
   pqSubmissionDate?: string | null;
   summary?: OrderReportSummaryData | null;
+  keyFieldsConfirmed?: boolean | null;
 }): OrderReportPqListMeta {
   const { summaryStatus } = options;
 
@@ -73,6 +75,7 @@ export function resolvePqListMeta(options: {
       pqLabel: PQ_LIST_LABEL_PENDING,
       pqHasPq: null,
       pqSubmissionDate: null,
+      keyFieldsConfirmed: null,
     };
   }
 
@@ -85,12 +88,18 @@ export function resolvePqListMeta(options: {
     submissionDate = extracted.submissionDate;
   }
 
+  const keyFieldsConfirmed =
+    options.keyFieldsConfirmed !== undefined
+      ? options.keyFieldsConfirmed
+      : false;
+
   if (hasPq && submissionDate) {
     return {
       summaryStatus,
       pqLabel: submissionDate,
       pqHasPq: true,
       pqSubmissionDate: submissionDate,
+      keyFieldsConfirmed,
     };
   }
 
@@ -99,6 +108,7 @@ export function resolvePqListMeta(options: {
     pqLabel: PQ_LIST_LABEL_NONE,
     pqHasPq: false,
     pqSubmissionDate: null,
+    keyFieldsConfirmed,
   };
 }
 
